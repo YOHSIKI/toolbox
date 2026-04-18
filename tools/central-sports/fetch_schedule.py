@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cs_api  # noqa: E402
-import secrets as local_secrets  # noqa: E402
+import cs_secrets as local_secrets  # noqa: E402
 
 
 def _mask(text: str, values: list[str]) -> str:

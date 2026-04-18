@@ -39,7 +39,7 @@
 
 ## ファイル構成
 
-- `secrets.py` — Fernet 復号で `central-sports` group を取得するだけの最小クラス
+- `cs_secrets.py` — Fernet 復号で `central-sports` group を取得するだけの最小関数（stdlib `secrets` と衝突しない命名）
 - `cs_api.py` — `Session.signin / get_schedule / signout` を持つ HTTP クライアント
 - `fetch_schedule.py` — CLI: ログイン → スケジュール取得 → マスク済み要約を stdout 出力
 - `README.md`（これ）
