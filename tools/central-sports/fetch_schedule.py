@@ -60,6 +60,7 @@ def main() -> int:
     ap.add_argument("--date-to", default=None)
     ap.add_argument("--identifier", default="central-sports")
     ap.add_argument("--raw", action="store_true", help="全レッスンの raw JSON を stderr に出力")
+    ap.add_argument("--with-spaces", action="store_true", help="is_reservable な lesson に listNos を叩いて空き space 数を付与")
     args = ap.parse_args()
 
     cred = local_secrets.get_group(args.identifier)
@@ -113,6 +114,20 @@ def main() -> int:
     for l in lessons:
         l["program_name"] = programs_map.get(l.get("program_id"))
         l["instructor_name"] = instructors_map.get(l.get("instructor_id"))
+
+    # --with-spaces: 各 is_reservable lesson の listNos を叩いて空き数を付与
+    if args.with_spaces:
+        for l in lessons:
+            if not l.get("is_reservable"):
+                l["available_spaces"] = None
+                continue
+            try:
+                nos_resp = sess.list_nos(l["id"])
+                nos = (nos_resp.get("data") or {}).get("nos") or []
+                l["available_spaces"] = len(nos)
+                l["available_nos"] = sorted(nos)
+            except Exception:
+                l["available_spaces"] = None
 
     summary = {
         "phase": "schedule",
