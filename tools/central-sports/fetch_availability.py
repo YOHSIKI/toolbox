@@ -51,7 +51,9 @@ def main() -> int:
     nos_data = nos_resp.get("data") or {}
     nos = nos_data.get("nos") or []
 
-    resp = sess.get_reserve_context(studio_lesson_id=args.lesson)
+    # nos があれば 1 個選んで context を呼ぶ（context は no 指定が必須の様子）
+    first_no = nos[0] if isinstance(nos, list) and nos else None
+    resp = sess.get_reserve_context(studio_lesson_id=args.lesson, no=first_no)
 
     mask_values = [mail, password, sess.device_id]
     at = sess.http.cookies.get("_at")
