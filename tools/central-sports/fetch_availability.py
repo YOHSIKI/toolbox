@@ -46,6 +46,11 @@ def main() -> int:
         }), file=sys.stderr)
         return 2
 
+    # まず listNos で no 候補を取得（コンポーネントの初期化順に合わせる）
+    nos_resp = sess.list_nos(args.lesson)
+    nos_data = nos_resp.get("data") or {}
+    nos = nos_data.get("nos") or []
+
     resp = sess.get_reserve_context(studio_lesson_id=args.lesson)
 
     mask_values = [mail, password, sess.device_id]
@@ -61,6 +66,9 @@ def main() -> int:
         "ok": not errors,
         "data_top_keys": sorted(data.keys()) if isinstance(data, dict) else None,
         "errors": errors,
+        "nos_sample": nos[:5] if isinstance(nos, list) else None,
+        "nos_count": len(nos) if isinstance(nos, list) else 0,
+        "nos_response_errors": nos_resp.get("errors"),
     }
 
     if isinstance(data, dict):

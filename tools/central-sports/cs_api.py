@@ -123,3 +123,14 @@ class Session:
         """POST /api/system/auth/signout"""
         r = self.http.post(f"{API_BASE}/system/auth/signout", json={}, timeout=15)
         return r.json()
+
+    def list_nos(self, studio_lesson_id: int) -> dict[str, Any]:
+        """GET /api/reservation/reservations/{lesson_id}/no
+
+        該当 lesson の space 番号リスト（予約可能なポジション）を返す。
+        """
+        r = self.http.get(
+            f"{API_BASE}/reservation/reservations/{studio_lesson_id}/no",
+            timeout=15,
+        )
+        return r.json()
