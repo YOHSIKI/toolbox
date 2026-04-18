@@ -98,7 +98,9 @@ def main() -> int:
     items = []
     programs_map = {}
     instructors_map = {}
-    spaces_count_by_room: dict[int, int] = {}
+    # studio_room_space_id -> space_num (capacity)
+    capacity_by_space_id: dict[int, int] = {}
+    space_name_by_id: dict[int, str] = {}
     if isinstance(studio_lessons, dict):
         items = studio_lessons.get("items") or []
         programs_map = {
@@ -109,11 +111,12 @@ def main() -> int:
             i.get("id"): i.get("nick_name") or i.get("name")
             for i in (studio_lessons.get("instructors") or [])
         }
-        # studio_room_spaces は room ごとの「座席リスト」。数えて capacity を得る
         for space in (studio_lessons.get("studio_room_spaces") or []):
-            room_id = space.get("studio_room_id")
-            if room_id is not None:
-                spaces_count_by_room[room_id] = spaces_count_by_room.get(room_id, 0) + 1
+            sid = space.get("id")
+            if sid is None:
+                continue
+            capacity_by_space_id[sid] = space.get("space_num")
+            space_name_by_id[sid] = space.get("name")
 
     lessons = [_summarize_lesson(it) for it in items if isinstance(it, dict)]
     # 名前解決
@@ -121,23 +124,25 @@ def main() -> int:
         l["program_name"] = programs_map.get(l.get("program_id"))
         l["instructor_name"] = instructors_map.get(l.get("instructor_id"))
 
-    # --with-spaces: 各 is_reservable lesson の listNos を叩いて「予約済み no」を取り、
-    # total_spaces (studio_room_spaces の件数) から空き = total - reserved を計算
+    # --with-spaces: 各 is_reservable lesson で:
+    #   capacity = lesson の studio_room_space_id から該当レイアウトの space_num を参照
+    #   reserved = listNos の件数（listNos は「予約済み no」を返す）
+    #   available = capacity - reserved
     if args.with_spaces:
         for l in lessons:
+            sid = l.get("studio_room_space_id")
+            l["capacity"] = capacity_by_space_id.get(sid)
+            l["space_layout_name"] = space_name_by_id.get(sid)
             if not l.get("is_reservable"):
                 l["reserved_count"] = None
                 l["available_count"] = None
                 continue
-            total = spaces_count_by_room.get(args.room)
             try:
                 nos_resp = sess.list_nos(l["id"])
-                # listNos は「予約済みの no」のリスト（マイページ画面で予約済みと表示される座席）
                 reserved_nos = (nos_resp.get("data") or {}).get("nos") or []
                 l["reserved_count"] = len(reserved_nos)
-                l["total_spaces"] = total
-                l["available_count"] = (total - len(reserved_nos)) if total is not None else None
-                l["reserved_nos"] = sorted(reserved_nos)[:10]
+                cap = l["capacity"]
+                l["available_count"] = (cap - len(reserved_nos)) if cap is not None else None
             except Exception:
                 l["reserved_count"] = None
                 l["available_count"] = None
