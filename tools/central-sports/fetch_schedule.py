@@ -135,9 +135,21 @@ def main() -> int:
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
-    if args.raw and schedule is not None:
-        raw_json = json.dumps(schedule, ensure_ascii=False)
-        print("--- RAW SCHEDULE ---", file=sys.stderr)
+    if args.raw:
+        # studio_rooms, member_possession_studio, program, instructor 等を見る
+        dump_keys = ["studio_rooms", "member_possession_studio", "program", "instructor", "studio_lessons", "schedule", "schedule_period", "reservation_priorities", "reserve_processions", "is_trial_or_experience"]
+        raw = {}
+        if isinstance(studio, dict) and "studio_rooms" in studio:
+            raw["studio_rooms"] = [
+                {k: r.get(k) for k in ["id", "name", "status", "schedule_position", "is_hide_from_member_site"] if k in r}
+                for r in (studio.get("studio_rooms") or [])[:10]
+            ]
+        for k in dump_keys:
+            if k == "studio_rooms":
+                continue
+            raw[k] = data.get(k)
+        raw_json = json.dumps(raw, ensure_ascii=False, default=str)
+        print("--- RAW ---", file=sys.stderr)
         print(_mask(raw_json, mask_values), file=sys.stderr)
 
     sess.signout()
