@@ -114,6 +114,21 @@ def main() -> int:
     elif isinstance(schedule, dict):
         summary["schedule_keys"] = sorted(schedule.keys())
 
+    # studio_lessons にレッスンの実体が入っているはず
+    studio_lessons = data.get("studio_lessons")
+    if isinstance(studio_lessons, list):
+        summary["studio_lessons_count"] = len(studio_lessons)
+        if studio_lessons and isinstance(studio_lessons[0], dict):
+            summary["studio_lesson_sample_keys"] = sorted(studio_lessons[0].keys())
+            summary["studio_lesson_sample"] = {
+                k: studio_lessons[0].get(k)
+                for k in ["id", "lesson_at", "end_at", "program_name", "studio_room_id", "remain_reservation", "status"]
+                if k in studio_lessons[0]
+            }
+    schedule_period = data.get("schedule_period")
+    if schedule_period:
+        summary["schedule_period"] = schedule_period
+
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
     if args.raw and schedule is not None:
