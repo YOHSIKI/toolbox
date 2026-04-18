@@ -100,23 +100,24 @@ class Session:
 
     def get_reserve_context(
         self,
-        studio_room_id: int,
-        program_id: int,
-        start_at: str,
-        instructor_ids: list[int] | None = None,
+        studio_lesson_id: int,
+        no: int | None = None,
+        ticket_id: int | None = None,
+        contract_group_no: int | None = None,
     ) -> dict[str, Any]:
-        """GET /api/reservation/reservations/choice/reserve-context
+        """GET /api/reservation/reservations/context
 
-        特定のレッスン 1 件に対する予約状況（残枠、reservedCount/maxReservableCount、
-        ticket 可否等）を返す。schedule API では取れない情報。
+        特定のレッスン 1 件に対する予約状況を返す。studio_lesson_id だけで呼べる。
+        レスポンスに reserve_processions / reservation_priorities / ticket 情報が入る。
         """
-        query: dict[str, Any] = {
-            "studio_room_id": studio_room_id,
-            "program_id": program_id,
-            "start_at": start_at,
-            "instructor_ids": instructor_ids or [],
-        }
-        return self._get_query("/reservation/reservations/choice/reserve-context", query)
+        query: dict[str, Any] = {"studio_lesson_id": studio_lesson_id}
+        if no is not None:
+            query["no"] = no
+        if ticket_id is not None:
+            query["ticket_id"] = ticket_id
+        if contract_group_no is not None:
+            query["contract_group_no"] = contract_group_no
+        return self._get_query("/reservation/reservations/context", query)
 
     def signout(self) -> dict[str, Any]:
         """POST /api/system/auth/signout"""

@@ -1,9 +1,7 @@
-"""特定の lesson（studio_room_id + program_id + start_at）の予約状況（残枠等）を取得。
+"""特定の studio_lesson（ID で指定）の予約コンテキストを取得する。
 
 使い方:
-  gateway --project toolbox run central-sports.cs-fetch-availability \
-    --room 177 --program 19 --start-at '2026-04-23T20:10:00+09:00' \
-    --instructor 2149
+  gateway --project toolbox run central-sports.cs-fetch-availability --lesson 1228610
 """
 
 from __future__ import annotations
@@ -29,10 +27,7 @@ def _mask(text: str, values: list[str]) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--room", type=int, required=True)
-    ap.add_argument("--program", type=int, required=True)
-    ap.add_argument("--start-at", required=True, help="ISO8601 例: 2026-04-23T20:10:00+09:00")
-    ap.add_argument("--instructor", type=int, action="append", default=[])
+    ap.add_argument("--lesson", type=int, required=True, help="studio_lesson_id")
     ap.add_argument("--identifier", default="central-sports")
     ap.add_argument("--raw", action="store_true")
     args = ap.parse_args()
@@ -44,15 +39,14 @@ def main() -> int:
     sess = cs_api.Session.new()
     signin = sess.signin(mail_address=mail, password=password)
     if signin.get("errors"):
-        print(json.dumps({"phase": "signin", "ok": False, "error_codes": [e.get("code") for e in signin["errors"]]}), file=sys.stderr)
+        print(json.dumps({
+            "phase": "signin",
+            "ok": False,
+            "error_codes": [e.get("code") for e in signin["errors"]],
+        }), file=sys.stderr)
         return 2
 
-    resp = sess.get_reserve_context(
-        studio_room_id=args.room,
-        program_id=args.program,
-        start_at=args.start_at,
-        instructor_ids=args.instructor,
-    )
+    resp = sess.get_reserve_context(studio_lesson_id=args.lesson)
 
     mask_values = [mail, password, sess.device_id]
     at = sess.http.cookies.get("_at")
@@ -62,24 +56,31 @@ def main() -> int:
     data = resp.get("data") or {}
     errors = resp.get("errors")
 
-    summary = {
-        "phase": "reserve-context",
+    summary: dict = {
+        "phase": "context",
         "ok": not errors,
-        "response_top_keys": sorted((resp or {}).keys()),
-        "data_type": type(data).__name__,
         "data_top_keys": sorted(data.keys()) if isinstance(data, dict) else None,
         "errors": errors,
     }
 
-    # 興味のあるフィールドを抽出
     if isinstance(data, dict):
-        for k in [
-            "reserved_count", "max_reservable_count", "is_reservable",
-            "reservable_from", "reservable_to", "remain_reservation",
-            "capacity", "studio_lesson", "reservation_status",
-        ]:
-            if k in data:
-                summary[k] = data[k]
+        sl = data.get("studio_lesson") or {}
+        summary["studio_lesson"] = {
+            "id": sl.get("id"),
+            "start_at": sl.get("start_at"),
+            "end_at": sl.get("end_at"),
+            "reserved_count": sl.get("reserved_count"),
+            "max_reservable_count": sl.get("max_reservable_count"),
+            "is_reservable": sl.get("is_reservable"),
+            "reservable_from": sl.get("reservable_from"),
+            "reservable_to": sl.get("reservable_to"),
+            "reservation_status": sl.get("reservation_status"),
+            "status": sl.get("status"),
+        } if sl else None
+        summary["reserve_processions_count"] = len(data.get("reserve_processions") or [])
+        summary["reservation_priorities_count"] = len(data.get("reservation_priorities") or [])
+        summary["my_reservation"] = data.get("my_reservation")
+        summary["tickets_count"] = len(data.get("tickets") or [])
 
     print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
 
