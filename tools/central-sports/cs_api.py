@@ -127,10 +127,41 @@ class Session:
     def list_nos(self, studio_lesson_id: int) -> dict[str, Any]:
         """GET /api/reservation/reservations/{lesson_id}/no
 
-        該当 lesson の space 番号リスト（予約可能なポジション）を返す。
+        該当 lesson で**予約済み** の no リスト（マイページ画面でグレー表示の座席番号）。
+        空き数は studio_room_space の space_num から引いて求める。
         """
         r = self.http.get(
             f"{API_BASE}/reservation/reservations/{studio_lesson_id}/no",
             timeout=15,
+        )
+        return r.json()
+
+    def reserve(
+        self,
+        studio_lesson_id: int,
+        no: int,
+        ticket_id: int | None = None,
+        contract_group_no: int | None = None,
+        reservation_type: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/reservation/reservations/reserve
+
+        body: {studio_lesson_id, no, [ticket_id], [contract_group_no], [reservation_type], ...}
+        成功時 data.reservation に予約結果が入る。
+        """
+        body: dict[str, Any] = {
+            "studio_lesson_id": studio_lesson_id,
+            "no": no,
+        }
+        if ticket_id is not None:
+            body["ticket_id"] = ticket_id
+        if contract_group_no is not None:
+            body["contract_group_no"] = contract_group_no
+        if reservation_type is not None:
+            body["reservation_type"] = reservation_type
+        r = self.http.post(
+            f"{API_BASE}/reservation/reservations/reserve",
+            json=body,
+            timeout=20,
         )
         return r.json()
