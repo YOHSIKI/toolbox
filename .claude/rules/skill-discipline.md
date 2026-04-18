@@ -1,0 +1,1 @@
+../../../skills/shared/rules/skill-discipline.md

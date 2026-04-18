@@ -1,0 +1,1 @@
+../../../skills/shared/rules/issue-management.md

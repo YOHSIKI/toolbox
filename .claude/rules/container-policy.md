@@ -1,0 +1,1 @@
+../../../skills/shared/rules/container-policy.md
