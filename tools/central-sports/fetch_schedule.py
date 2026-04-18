@@ -100,13 +100,19 @@ def main() -> int:
             "schedule_open_days": studio.get("schedule_open_days"),
             "schedule_open_time": studio.get("schedule_open_time"),
         },
+        "response_top_keys": sorted((resp or {}).keys()),
+        "data_top_keys": sorted(data.keys()) if isinstance(data, dict) else None,
+        "schedule_type_in_resp": type(schedule).__name__,
         "schedule_present": schedule is not None,
+        "errors": (resp or {}).get("errors"),
     }
     if isinstance(schedule, list):
         summary["entry_count"] = len(schedule)
         summary["sample_entry_keys"] = (
             sorted(schedule[0].keys()) if schedule and isinstance(schedule[0], dict) else []
         )
+    elif isinstance(schedule, dict):
+        summary["schedule_keys"] = sorted(schedule.keys())
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
