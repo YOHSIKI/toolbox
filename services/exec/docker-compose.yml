@@ -1,0 +1,53 @@
+services:
+  # アドホック実行用（gateway exec "python tools/.../script.py" で使用）。
+  # Claude 在席の dev-admin とは独立して secrets を持ち、スクリプトだけ走る。
+  exec:
+    image: devtools:latest
+    container_name: toolbox-exec
+    working_dir: /workspace/toolbox
+    user: "1026:100"
+    environment:
+      TZ: Asia/Tokyo
+      CHROMIUM_PATH: /usr/bin/chromium
+      SECRETS_DIR: /workspace/.secrets
+      PIP_CACHE_DIR: /tmp/.pip_cache
+      XDG_CACHE_HOME: /tmp/.cache
+    volumes:
+      # toolbox ソース
+      - /volume1/toolbox:/workspace/toolbox:rw
+      # secrets（.master.key + .enc）: ファイル単位ではなくディレクトリ ro。
+      # Claude 在席でない実行コンテナなので許容。
+      - /volume1/infra/secrets:/workspace/.secrets:ro
+      # agent-config（SecretManager 共通ライブラリ参照用、ro）
+      - /volume1/agent-config:/workspace/agent-config:ro
+    tmpfs:
+      - /tmp:mode=1777
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  # 将来用のテストサービス（read_only + tmpfs、本番データに影響させない）
+  test:
+    profiles: ["test"]
+    image: devtools:latest
+    container_name: toolbox-test
+    read_only: true
+    working_dir: /workspace/toolbox
+    user: "1026:100"
+    environment:
+      TZ: Asia/Tokyo
+      SECRETS_DIR: /workspace/.secrets
+      XDG_CACHE_HOME: /tmp/.cache
+      PIP_CACHE_DIR: /tmp/.pip_cache
+      MYPY_CACHE_DIR: /tmp/.mypy_cache
+      TMPDIR: /tmp
+    volumes:
+      - /volume1/toolbox:/workspace/toolbox:ro
+      - /volume1/infra/secrets:/workspace/.secrets:ro
+      - /volume1/agent-config:/workspace/agent-config:ro
+    tmpfs:
+      - /tmp:mode=1777
+      - /home/node:mode=0755,uid=1026,gid=100
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
