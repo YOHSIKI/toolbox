@@ -11,12 +11,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+_t_start = time.monotonic()
+
 import cs_api  # noqa: E402
 import cs_secrets as local_secrets  # noqa: E402
+
+_t_import_done = time.monotonic()
 
 
 def main() -> int:
@@ -29,9 +34,11 @@ def main() -> int:
     cred = local_secrets.get_group(args.identifier)
     mail = cred.get("email") or cred.get("mail_address")
     password = cred.get("password")
+    t_secrets_done = time.monotonic()
 
     sess = cs_api.Session.new()
     signin = sess.signin(mail_address=mail, password=password)
+    t_signin_done = time.monotonic()
     if signin.get("errors"):
         print(json.dumps({
             "phase": "signin",
@@ -41,6 +48,7 @@ def main() -> int:
         return 2
 
     resp = sess.reserve(studio_lesson_id=args.lesson, no=args.no)
+    t_reserve_done = time.monotonic()
     data = resp.get("data") or {}
     errors = resp.get("errors")
     reservation = data.get("reservation") if isinstance(data, dict) else None
@@ -50,6 +58,13 @@ def main() -> int:
         "ok": not errors and reservation is not None,
         "errors": errors,
         "response_top_keys": sorted((resp or {}).keys()),
+        "timings_ms": {
+            "import": round((_t_import_done - _t_start) * 1000, 1),
+            "secrets_decrypt": round((t_secrets_done - _t_import_done) * 1000, 1),
+            "signin": round((t_signin_done - t_secrets_done) * 1000, 1),
+            "reserve": round((t_reserve_done - t_signin_done) * 1000, 1),
+            "total_python": round((t_reserve_done - _t_start) * 1000, 1),
+        },
     }
     if isinstance(reservation, dict):
         summary["reservation"] = {
