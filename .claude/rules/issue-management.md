@@ -1,1 +1,1 @@
-../../../skills/shared/rules/issue-management.md
+../../../agent-config/shared/rules/issue-management.md

@@ -1,1 +1,1 @@
-../../../skills/shared/rules/worktree-policy.md
+../../../agent-config/shared/rules/worktree-policy.md

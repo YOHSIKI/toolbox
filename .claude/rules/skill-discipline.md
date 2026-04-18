@@ -1,1 +1,1 @@
-../../../skills/shared/rules/skill-discipline.md
+../../../agent-config/shared/rules/skill-discipline.md

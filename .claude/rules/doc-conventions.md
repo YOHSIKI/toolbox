@@ -1,1 +1,1 @@
-../../../skills/shared/rules/doc-conventions.md
+../../../agent-config/shared/rules/doc-conventions.md

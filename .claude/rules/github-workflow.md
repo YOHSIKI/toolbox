@@ -1,1 +1,1 @@
-../../../skills/shared/rules/github-workflow.md
+../../../agent-config/shared/rules/github-workflow.md

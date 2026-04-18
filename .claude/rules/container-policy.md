@@ -1,1 +1,1 @@
-../../../skills/shared/rules/container-policy.md
+../../../agent-config/shared/rules/container-policy.md
