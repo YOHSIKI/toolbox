@@ -1,0 +1,7 @@
+# Central Sports 予約ツール用依存
+# 再現用: python3 -m venv /workspace/toolbox/.venv && /workspace/toolbox/.venv/bin/pip install -r requirements.txt
+
+curl_cffi==0.15.0
+cryptography==46.0.7
+PyYAML==6.0.3
+requests==2.33.1
