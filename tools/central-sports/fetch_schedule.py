@@ -98,6 +98,7 @@ def main() -> int:
     items = []
     programs_map = {}
     instructors_map = {}
+    spaces_count_by_room: dict[int, int] = {}
     if isinstance(studio_lessons, dict):
         items = studio_lessons.get("items") or []
         programs_map = {
@@ -108,6 +109,11 @@ def main() -> int:
             i.get("id"): i.get("nick_name") or i.get("name")
             for i in (studio_lessons.get("instructors") or [])
         }
+        # studio_room_spaces は room ごとの「座席リスト」。数えて capacity を得る
+        for space in (studio_lessons.get("studio_room_spaces") or []):
+            room_id = space.get("studio_room_id")
+            if room_id is not None:
+                spaces_count_by_room[room_id] = spaces_count_by_room.get(room_id, 0) + 1
 
     lessons = [_summarize_lesson(it) for it in items if isinstance(it, dict)]
     # 名前解決
@@ -115,19 +121,26 @@ def main() -> int:
         l["program_name"] = programs_map.get(l.get("program_id"))
         l["instructor_name"] = instructors_map.get(l.get("instructor_id"))
 
-    # --with-spaces: 各 is_reservable lesson の listNos を叩いて空き数を付与
+    # --with-spaces: 各 is_reservable lesson の listNos を叩いて「予約済み no」を取り、
+    # total_spaces (studio_room_spaces の件数) から空き = total - reserved を計算
     if args.with_spaces:
         for l in lessons:
             if not l.get("is_reservable"):
-                l["available_spaces"] = None
+                l["reserved_count"] = None
+                l["available_count"] = None
                 continue
+            total = spaces_count_by_room.get(args.room)
             try:
                 nos_resp = sess.list_nos(l["id"])
-                nos = (nos_resp.get("data") or {}).get("nos") or []
-                l["available_spaces"] = len(nos)
-                l["available_nos"] = sorted(nos)
+                # listNos は「予約済みの no」のリスト（マイページ画面で予約済みと表示される座席）
+                reserved_nos = (nos_resp.get("data") or {}).get("nos") or []
+                l["reserved_count"] = len(reserved_nos)
+                l["total_spaces"] = total
+                l["available_count"] = (total - len(reserved_nos)) if total is not None else None
+                l["reserved_nos"] = sorted(reserved_nos)[:10]
             except Exception:
-                l["available_spaces"] = None
+                l["reserved_count"] = None
+                l["available_count"] = None
 
     summary = {
         "phase": "schedule",
