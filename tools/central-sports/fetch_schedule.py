@@ -116,18 +116,22 @@ def main() -> int:
 
     # studio_lessons にレッスンの実体が入っているはず
     studio_lessons = data.get("studio_lessons")
+    summary["studio_lessons_type"] = type(studio_lessons).__name__
     if isinstance(studio_lessons, list):
         summary["studio_lessons_count"] = len(studio_lessons)
         if studio_lessons and isinstance(studio_lessons[0], dict):
             summary["studio_lesson_sample_keys"] = sorted(studio_lessons[0].keys())
+            sample = studio_lessons[0]
             summary["studio_lesson_sample"] = {
-                k: studio_lessons[0].get(k)
+                k: sample.get(k)
                 for k in ["id", "lesson_at", "end_at", "program_name", "studio_room_id", "remain_reservation", "status"]
-                if k in studio_lessons[0]
+                if k in sample
             }
+    elif isinstance(studio_lessons, dict):
+        summary["studio_lessons_keys"] = sorted(studio_lessons.keys())
     schedule_period = data.get("schedule_period")
-    if schedule_period:
-        summary["schedule_period"] = schedule_period
+    summary["schedule_period"] = schedule_period
+    summary["script_version"] = "debug-v2"
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
