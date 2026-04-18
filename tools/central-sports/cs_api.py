@@ -153,6 +153,18 @@ class Session:
         )
         return r.json()
 
+    def move(self, reservation_id: int, no: int) -> dict[str, Any]:
+        """PUT /api/reservation/reservations/move
+
+        既存予約の席番号変更。body: {reservation_id, no}
+        """
+        r = self.http.put(
+            f"{API_BASE}/reservation/reservations/move",
+            json={"reservation_id": reservation_id, "no": no},
+            timeout=15,
+        )
+        return r.json()
+
     def reserve(
         self,
         studio_lesson_id: int,
