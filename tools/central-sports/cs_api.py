@@ -136,6 +136,23 @@ class Session:
         )
         return r.json()
 
+    def list_my_reservations(self) -> dict[str, Any]:
+        """GET /api/reservation/reservations — 自分の予約一覧（現在/今後）"""
+        r = self.http.get(f"{API_BASE}/reservation/reservations", timeout=15)
+        return r.json()
+
+    def cancel(self, reservation_ids: list[int]) -> dict[str, Any]:
+        """PUT /api/reservation/reservations/cancel
+
+        body: {reservation_ids: [id1, id2, ...]}
+        """
+        r = self.http.put(
+            f"{API_BASE}/reservation/reservations/cancel",
+            json={"reservation_ids": reservation_ids},
+            timeout=15,
+        )
+        return r.json()
+
     def reserve(
         self,
         studio_lesson_id: int,
