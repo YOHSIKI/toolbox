@@ -66,8 +66,8 @@ class CalendarQueryService:
             lessons = self._gateway.fetch_week(studio.ref, week_start, days=7)
             self._annotate_reserved_state(lessons)
         else:
+            # 未開放週は公開月間 API から取得、state=AVAILABLE のまま（予約予定として扱う）
             lessons = self._fetch_public_monthly_week(studio, week_start)
-            self._annotate_reserved_state(lessons)
         logger.info(
             "build_week studio=%s week=%s out_of_range=%s lessons=%d",
             studio.display_name, week_start, out_of_range, len(lessons),

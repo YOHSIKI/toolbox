@@ -151,7 +151,9 @@ def map_public_monthly(
                 is_reservable=False,
                 reservable_from=None,
                 reservable_to=None,
-                state=LessonState.UNRESERVABLE,
+                # 未開放週は「空きあり」相当の見た目でカレンダーに描画し、パネル側で
+                # 予約予定フォームに切り替える。is_reservable=False だけは維持
+                state=LessonState.AVAILABLE,
             )
             lessons.append(lesson)
 

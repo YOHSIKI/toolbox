@@ -1077,24 +1077,6 @@ h4 { font-size: 13px; }
   color: var(--text-faint);
   text-decoration: line-through;
 }
-/* 予約開放前（未来・予約予定として登録可） */
-.lesson--pending {
-  background: var(--accent-soft);
-  border: 1px dashed var(--accent-soft-border);
-  color: var(--text);
-}
-.lesson--pending .lesson-name { color: var(--accent); }
-/* 開催済（過去） */
-.lesson--past {
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  opacity: 0.55;
-}
-.lesson--past .lesson-name,
-.lesson--past .lesson-sub {
-  color: var(--text-faint);
-  text-decoration: line-through;
-}
 /* カレンダー上で現在パネルに表示中のレッスンを視覚的に強調 */
 .lesson--is-selected {
   outline: 3px solid var(--accent);
@@ -1326,4 +1308,3 @@ h4 { font-size: 13px; }
 .legend-swatch--reserved  { background: var(--success-soft);  border: 1px solid #bbf7d0; border-left: 3px solid var(--success); }
 .legend-swatch--target    { background: var(--accent-soft);   border: 1px solid var(--accent-soft-border); border-left: 3px solid var(--accent); }
 .legend-swatch--full      { background: var(--surface-sunken); border: 1px solid var(--border); }
-.legend-swatch--pending   { background: var(--accent-soft); border: 1px dashed var(--accent-soft-border); }

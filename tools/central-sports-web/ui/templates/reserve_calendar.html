@@ -14,15 +14,6 @@
 {% endif %}
 
 {% if view %}
-{% if view.out_of_range %}
-<div class="card" style="border-left:3px solid var(--accent); padding:12px 18px; margin-bottom:16px; background:var(--accent-soft);">
-  <b>この週は予約開放前です。</b>
-  <span class="muted" style="margin-left:6px;">
-    予約開放は毎日 09:00 に 7 日先までです（最終確定: {{ view.open_until.strftime('%-m/%-d') }} 分まで）。
-    レッスンをクリックすると、対象日の 7 日前 09:00 に自動予約する「予約予定」を登録できます。
-  </span>
-</div>
-{% endif %}
 <div class="toolbar">
   <div class="toolbar-left">
     <div class="select">
@@ -54,8 +45,7 @@
     <div class="legend-item"><span class="legend-swatch legend-swatch--available"></span>空きあり</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--reserved"></span>予約済み</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--target"></span>定期予約登録</div>
-    <div class="legend-item"><span class="legend-swatch legend-swatch--full"></span>満席</div>
-    <div class="legend-item"><span class="legend-swatch legend-swatch--pending"></span>予約開放前（予約予定可）</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--full"></span>予約不可（満席・期限切れ・開催済）</div>
   </div>
 </div>
 
@@ -87,9 +77,7 @@
             {% set cls = 'lesson lesson--available' %}
             {% if lesson.state.value == 'reserved' %}{% set cls = 'lesson lesson--reserved' %}
             {% elif lesson.state.value == 'target' %}{% set cls = 'lesson lesson--target' %}
-            {% elif lesson.state.value == 'full' %}{% set cls = 'lesson lesson--full' %}
-            {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}{% set cls = 'lesson lesson--past' %}
-            {% elif lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--pending' %}
+            {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--full' %}
             {% endif %}
             {% set sel = view.selected_lesson %}
             {% set is_selected = sel is not none and sel.lesson_date == lesson.lesson_date and sel.start_time == lesson.start_time and sel.program_id == lesson.program_id %}
@@ -105,7 +93,7 @@
                 {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}
                   <span>{{ lesson.instructor_name or '-' }}</span><span>開催済</span>
                 {% elif lesson.state.value == 'unreservable' %}
-                  <span>{{ lesson.instructor_name or '-' }}</span><span>予約予定 可</span>
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>予約不可</span>
                 {% else %}
                   <span>{{ lesson.instructor_name or '-' }}</span>
                   {% if lesson.remaining_seats is not none %}<span>残 {{ lesson.remaining_seats }}</span>{% endif %}
@@ -158,11 +146,7 @@
           </div>
           <div class="muted" style="font-size:11px;">別の席を選んで「席を変更」を押してください。</div>
         </form>
-      {% elif lesson.state.value == 'full' %}
-        <p class="muted">このレッスンは満席です。</p>
-      {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}
-        <p class="muted">このレッスンは開催済みです。</p>
-      {% elif lesson.state.value == 'unreservable' %}
+      {% elif view.out_of_range %}
         <form method="post" action="{{ url_for('intent_create') }}" id="reserve-form" class="stack stack-sm">
           <input type="hidden" name="return_to" value="{{ return_to }}">
           <input type="hidden" name="lesson_date" value="{{ lesson.lesson_date.isoformat() }}">
@@ -170,7 +154,6 @@
           <input type="hidden" name="program_id" value="{{ lesson.program_id }}">
           <input type="hidden" name="program_name" value="{{ lesson.program_name }}">
           <div class="muted" style="font-size:12px; line-height:1.5;">
-            この週はまだ予約開放されていません。<br>
             対象日の 7 日前 09:00 に自動で予約を取りにいく<b>予約予定</b>を登録できます。
           </div>
           <label class="field-label">希望席（クリックで優先順位、もう一度で解除）</label>
@@ -178,6 +161,12 @@
           <input type="hidden" name="seat_preferences" id="intent-seat-input">
           <div class="muted" style="font-size:11px;">開放日 9:00 に、この順番で席を試します。</div>
         </form>
+      {% elif lesson.state.value == 'full' %}
+        <p class="muted">このレッスンは満席です。</p>
+      {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}
+        <p class="muted">このレッスンは開催済みです。</p>
+      {% elif lesson.state.value == 'unreservable' %}
+        <p class="muted">このレッスンは予約受付終了または予約不可です。</p>
       {% else %}
         <form method="post" action="{{ url_for('reserve_create') }}" id="reserve-form" class="stack stack-sm">
           <input type="hidden" name="studio_lesson_id" value="{{ lesson.studio_lesson_id }}">
@@ -219,11 +208,11 @@
             <button class="btn btn--danger-ghost" type="submit" style="width:100%;" data-loading-text="取消中…">取消</button>
           </form>
           <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="変更中…">席を変更</button>
-        {% elif lesson.state.value == 'full' or (lesson.state.value == 'unreservable' and lesson.lesson_date < today) %}
-          <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}" style="flex:1;justify-content:center;">閉じる</a>
-        {% elif lesson.state.value == 'unreservable' %}
+        {% elif view.out_of_range %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
           <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="登録中…">予約予定を登録</button>
+        {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}
+          <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}" style="flex:1;justify-content:center;">閉じる</a>
         {% else %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
           <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="予約中…">予約する</button>
