@@ -137,6 +137,9 @@ def map_weekly_schedule(
         program_id = str(program_id_raw) if program_id_raw is not None else ""
         program_entry = programs.get(program_id_raw) or {}
         program_name = str(program_entry.get("name") or program_id or "レッスン")
+        # キッズ等のスクール系は除外（大人の単発予約対象外）
+        if "スクール" in program_name:
+            continue
 
         instructor_id = _coerce_int(item.get("instructor_id"))
         instructor_entry = instructors.get(instructor_id) or instructors.get(item.get("instructor_id")) or {}

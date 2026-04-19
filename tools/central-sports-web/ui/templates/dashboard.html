@@ -77,24 +77,27 @@
           {% for r in data.current_reservations %}
           <div class="list-row">
             <div class="list-date">
-              <div class="list-date-day">{{ r.lesson_date.day }}</div>
-              <div>{{ ['月','火','水','木','金','土','日'][r.lesson_date.weekday()] }} {{ r.lesson_time }}</div>
+              <div class="list-date-day">{{ r.lesson_date.month }}/{{ r.lesson_date.day }}</div>
+              <div>（{{ ['月','火','水','木','金','土','日'][r.lesson_date.weekday()] }}）{{ r.lesson_time }}</div>
             </div>
             <div>
               <div class="list-title">{{ r.program_name }}</div>
               <div class="list-meta">
-                {% if r.seat_no is not none %}<span>席 {{ '%02d' | format(r.seat_no) }}</span><span class="list-meta-dot">·</span>{% endif %}
-                <span>担当 {{ r.instructor_name or '未定' }}</span>
+                {% if r.seat_no is not none %}<span>席 {{ '%02d' | format(r.seat_no) }}</span>{% endif %}
+                {% if r.instructor_name %}<span class="list-meta-dot">·</span><span>担当 {{ r.instructor_name }}</span>{% endif %}
                 {% if r.origin.value == 'recurring' %}
                   <span class="list-meta-dot">·</span>
                   <span class="badge badge--accent" style="font-size:10px;padding:1px 6px;">定期</span>
+                {% elif r.origin.value == 'intent' %}
+                  <span class="list-meta-dot">·</span>
+                  <span class="badge badge--accent" style="font-size:10px;padding:1px 6px;">予約予定</span>
                 {% endif %}
               </div>
             </div>
             <div class="list-actions">
               <form method="post" action="{{ url_for('reserve_cancel', reservation_id=r.id) }}"
                     onsubmit="return confirm('{{ r.program_name }} の予約を取り消しますか？');" style="display:inline;">
-                <button class="btn btn--danger-ghost" type="submit">取消</button>
+                <button class="btn btn--danger-ghost" type="submit" data-loading-text="取消中…">取消</button>
               </form>
             </div>
           </div>
@@ -117,8 +120,8 @@
           {% for u in data.upcoming %}
           <div class="list-row">
             <div class="list-date">
-              <div class="list-date-day">{{ u.lesson_date.day }}</div>
-              <div>{{ ['月','火','水','木','金','土','日'][u.lesson_date.weekday()] }} {{ u.lesson_time }}</div>
+              <div class="list-date-day">{{ u.lesson_date.month }}/{{ u.lesson_date.day }}</div>
+              <div>（{{ ['月','火','水','木','金','土','日'][u.lesson_date.weekday()] }}）{{ u.lesson_time }}</div>
             </div>
             <div>
               <div class="list-title">{{ u.program_name }}</div>

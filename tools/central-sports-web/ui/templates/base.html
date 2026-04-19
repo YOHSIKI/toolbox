@@ -12,6 +12,26 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', path='/img/favicon-192.png') }}">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='/img/favicon-192.png') }}">
   <link rel="shortcut icon" href="{{ url_for('static', path='/img/favicon.ico') }}">
+  <script>
+    // フォーム submit 時、送信ボタンを disable + ラベル切替して連打と実行中表示を統一
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('form').forEach(function(form) {
+        form.addEventListener('submit', function() {
+          var targets = Array.from(form.querySelectorAll('button[type=submit]'));
+          document.querySelectorAll('button[form]').forEach(function(b) {
+            if (b.getAttribute('form') === form.id) targets.push(b);
+          });
+          targets.forEach(function(btn) {
+            var lbl = btn.getAttribute('data-loading-text');
+            if (lbl) btn.textContent = lbl;
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'progress';
+          });
+        });
+      });
+    });
+  </script>
   {% block head_extra %}{% endblock %}
 </head>
 <body>

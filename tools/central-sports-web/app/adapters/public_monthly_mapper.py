@@ -113,14 +113,21 @@ def map_public_monthly(
             continue
         candidates = by_youbi.get(_youbi_of_date(day), [])
         for row in candidates:
-            # yoyakb は予約区分（固定スクール等は '1' などで別扱い）。
-            # A1 の通常レッスンは '0' が圧倒的多数なので表示対象から外さない。
+            # スクール系（キッズ・合気道等、長期契約/別運用）は除外
+            if str(row.get("school") or "0") == "1":
+                continue
+            program_name_raw = str(row.get("prognm") or "")
+            # 予約不要のスクール（yoyakb=1）や、名前が「スクール」で終わるものも除外
+            if str(row.get("yoyakb") or "0") == "1":
+                continue
+            if "スクール" in program_name_raw:
+                continue
             start_time = _hhmm(row.get("sttime"))
             if start_time is None:
                 continue
             end_time = _end_hhmm(start_time, row.get("totime"))
             program_id = str(row.get("progcd") or "")
-            program_name = str(row.get("prognm") or program_id or "レッスン")
+            program_name = program_name_raw or program_id or "レッスン"
             instructor_name = row.get("insnm") or row.get("instnm")
             if isinstance(instructor_name, str):
                 instructor_name = instructor_name.strip() or None

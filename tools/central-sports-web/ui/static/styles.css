@@ -1071,7 +1071,19 @@ h4 { font-size: 13px; }
 .lesson--full {
   background: var(--surface-sunken);
   border: 1px solid var(--border);
-  opacity: 0.6;
+}
+.lesson--full .lesson-name,
+.lesson--full .lesson-sub {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+/* カレンダー上で現在パネルに表示中のレッスンを視覚的に強調 */
+.lesson--is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  position: relative;
+  z-index: 2;
 }
 
 .lesson--target {

@@ -31,10 +31,20 @@ class ReservationStatus(str, Enum):
 
 
 class ReservationOrigin(str, Enum):
-    """予約の由来。単発予約から作ったか、定期予約から自動で取られたか。"""
+    """予約の由来。単発予約・定期予約・予約予定のいずれか。"""
 
     SINGLE = "single"
     RECURRING = "recurring"
+    INTENT = "intent"
+
+
+class IntentStatus(str, Enum):
+    """予約予定の状態。"""
+
+    PENDING = "pending"
+    EXECUTED = "executed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class LessonState(str, Enum):
@@ -155,6 +165,29 @@ class RecurringReservation:
     @property
     def headline(self) -> str:
         return f"毎週 {self.weekday_label}曜 {self.start_time} {self.program_name}"
+
+    def seat_preferences_as_labels(self) -> list[str]:
+        return [f"{no:02d}" for no in self.seat_preferences]
+
+
+@dataclass(slots=True)
+class BookingIntent:
+    """先の週の特定レッスンを、開放日の 9:00 に自動予約する予約予定。"""
+
+    id: str
+    lesson_date: date
+    lesson_time: str
+    program_id: str
+    program_name: str
+    studio_id: int
+    studio_room_id: int
+    seat_preferences: list[int] = field(default_factory=list)
+    status: IntentStatus = IntentStatus.PENDING
+    scheduled_run_at: datetime | None = None
+    executed_at: datetime | None = None
+    note: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def seat_preferences_as_labels(self) -> list[str]:
         return [f"{no:02d}" for no in self.seat_preferences]

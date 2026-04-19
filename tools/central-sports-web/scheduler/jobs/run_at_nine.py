@@ -17,6 +17,13 @@ def run_at_nine_job(context: AppContext) -> None:
         logger.info("run_at_nine skipped: not configured")
         return
     today = datetime.now(tz=context.settings.tz).date()
+
+    # 1) 予約予定（BookingIntent）: scheduled_run_at.date() <= today のものを実行
+    intent_results = []
+    if context.booking_intent is not None:
+        intent_results = context.booking_intent.execute_due(today=today)
+        logger.info("run_at_nine: intents executed=%d", len(intent_results))
+
     target_date = today + timedelta(days=7)  # 予約開放は 1 週間先まで
     items = context.recurring.list_active()
     targets = [i for i in items if i.day_of_week == target_date.weekday()]

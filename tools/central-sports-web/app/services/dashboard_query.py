@@ -7,11 +7,13 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from app.domain.entities import (
+    BookingIntent,
     DailySummary,
     DailySummaryItem,
     HistoryCategory,
     HistoryEntry,
     HistoryResult,
+    IntentStatus,
     RecurringReservation,
     RecurringStatus,
     Reservation,
@@ -20,7 +22,12 @@ from app.domain.entities import (
     next_weekday,
 )
 from config.settings import Settings
-from db.repositories import history_repo, recurring_repo, reservation_repo
+from db.repositories import (
+    history_repo,
+    intent_repo,
+    recurring_repo,
+    reservation_repo,
+)
 
 
 @dataclass(slots=True)
@@ -55,10 +62,14 @@ class DashboardQueryService:
         )
 
         recurring_items = recurring_repo.list_recurring(self._db_path)
+        intents = intent_repo.list_intents(
+            self._db_path, status=IntentStatus.PENDING, pending_from=today
+        )
         upcoming = self._build_upcoming(
             recurring_items=recurring_items,
             reservations=current,
             today=today,
+            intents=intents,
         )
 
         recent_history = history_repo.list_recent(
@@ -86,6 +97,9 @@ class DashboardQueryService:
         success = warning = failure = 0
         items: list[DailySummaryItem] = []
         for rec in records:
+            # 取消・席変更はサマリー対象外（「予約結果」ではないため）
+            if rec.endpoint in {"reservation.cancel", "reservation.move"}:
+                continue
             metadata = rec.metadata or {}
             program_name = str(metadata.get("program_name", "レッスン"))
             seat_no_raw = metadata.get("seat_no")
@@ -134,6 +148,7 @@ class DashboardQueryService:
         recurring_items: list[RecurringReservation],
         reservations: list[Reservation],
         today: date,
+        intents: list[BookingIntent] | None = None,
     ) -> list[UpcomingReservation]:
         occupied = {
             (r.lesson_date, r.lesson_time, r.program_id, r.studio_id, r.studio_room_id)
@@ -173,6 +188,33 @@ class DashboardQueryService:
                         scheduled_run_at=run_at,
                     )
                 )
+        # 予約予定（Intent）も upcoming に並べる
+        for intent in intents or []:
+            if intent.status is not IntentStatus.PENDING:
+                continue
+            if intent.lesson_date < today:
+                continue
+            key = (
+                intent.lesson_date,
+                intent.lesson_time,
+                intent.program_id,
+                intent.studio_id,
+                intent.studio_room_id,
+            )
+            if key in occupied:
+                continue
+            results.append(
+                UpcomingReservation(
+                    recurring_id=f"intent:{intent.id}",
+                    lesson_date=intent.lesson_date,
+                    lesson_time=intent.lesson_time,
+                    program_name=intent.program_name,
+                    seat_preferences=list(intent.seat_preferences),
+                    scheduled_run_at=intent.scheduled_run_at or datetime.combine(
+                        intent.lesson_date - timedelta(days=7), time(run_hour, run_minute)
+                    ),
+                )
+            )
         results.sort(key=lambda x: (x.scheduled_run_at, x.lesson_date, x.lesson_time))
         return results
 

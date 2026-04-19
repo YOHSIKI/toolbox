@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import Request
 
+from app.services.booking_intent import BookingIntentService
 from app.services.calendar_query import CalendarQueryService
 from app.services.dashboard_query import DashboardQueryService
 from app.services.reserve_recurring import RecurringService
@@ -49,6 +50,7 @@ class AppContext:
     recurring: RecurringService | None
     warmup: SessionWarmupService | None
     sync_reservations: SyncMyReservationsService | None
+    booking_intent: BookingIntentService | None = None
 
     @property
     def is_fully_configured(self) -> bool:
@@ -76,6 +78,7 @@ def build_context(settings: Settings) -> AppContext:
     recurring: RecurringService | None = None
     warmup: SessionWarmupService | None = None
     sync_reservations: SyncMyReservationsService | None = None
+    booking_intent: BookingIntentService | None = None
 
     if bundle is not None:
         email = bundle.values.get("email") or bundle.values.get("mail_address")
@@ -107,6 +110,7 @@ def build_context(settings: Settings) -> AppContext:
             recurring = RecurringService(settings.db_file, gateway, settings)
             warmup = SessionWarmupService(settings.db_file, gateway, notifier)
             sync_reservations = SyncMyReservationsService(settings.db_file, gateway)
+            booking_intent = BookingIntentService(settings.db_file, gateway, settings)
     else:
         logger.warning(
             "running without secrets: hacomono API is not reachable; UI only mode"
@@ -127,6 +131,7 @@ def build_context(settings: Settings) -> AppContext:
         recurring=recurring,
         warmup=warmup,
         sync_reservations=sync_reservations,
+        booking_intent=booking_intent,
     )
 
 

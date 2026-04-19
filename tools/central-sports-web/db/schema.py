@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 INITIAL_SCHEMA = [
@@ -130,6 +130,59 @@ INITIAL_SCHEMA = [
         applied_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
     """,
+    # ------------------------------------------------------
+    # 予約予定（未開放の先のレッスンを、開放日の 9:00 に自動予約）
+    # ------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS booking_intents (
+        id TEXT PRIMARY KEY,
+        lesson_date TEXT NOT NULL,
+        lesson_time TEXT NOT NULL,
+        program_id TEXT NOT NULL,
+        program_name TEXT NOT NULL,
+        studio_id INTEGER NOT NULL,
+        studio_room_id INTEGER NOT NULL,
+        seat_preferences TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        scheduled_run_at TEXT NOT NULL,
+        executed_at TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_intents_run_at
+        ON booking_intents (scheduled_run_at, status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_intents_date
+        ON booking_intents (lesson_date, status)
+    """,
+]
+
+
+V3_SETUP: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS booking_intents (
+        id TEXT PRIMARY KEY,
+        lesson_date TEXT NOT NULL,
+        lesson_time TEXT NOT NULL,
+        program_id TEXT NOT NULL,
+        program_name TEXT NOT NULL,
+        studio_id INTEGER NOT NULL,
+        studio_room_id INTEGER NOT NULL,
+        seat_preferences TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        scheduled_run_at TEXT NOT NULL,
+        executed_at TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_intents_run_at ON booking_intents (scheduled_run_at, status)",
+    "CREATE INDEX IF NOT EXISTS idx_intents_date ON booking_intents (lesson_date, status)",
 ]
 
 

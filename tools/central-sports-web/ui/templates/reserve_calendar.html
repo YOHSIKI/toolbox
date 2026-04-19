@@ -36,6 +36,16 @@
       </a>
     </div>
     <a class="btn btn--ghost" href="{{ url_for('reserve_calendar') }}">今週</a>
+    <form method="post" action="{{ url_for('sync_now') }}" style="display:inline;">
+      <button class="btn" type="submit" title="マイページの予約を取り込む">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        同期
+      </button>
+    </form>
   </div>
   <div class="legend">
     <div class="legend-item"><span class="legend-swatch legend-swatch--available"></span>空きあり</div>
@@ -139,8 +149,26 @@
           </div>
           <div class="muted" style="font-size:11px;">別の席を選んで「席を変更」を押してください。</div>
         </form>
-      {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}
-        <p class="muted">現在このレッスンは予約できません。</p>
+      {% elif lesson.state.value == 'full' %}
+        <p class="muted">このレッスンは満席です。</p>
+      {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}
+        <p class="muted">このレッスンは開催済みです。</p>
+      {% elif lesson.state.value == 'unreservable' %}
+        <form method="post" action="{{ url_for('intent_create') }}" id="reserve-form" class="stack stack-sm">
+          <input type="hidden" name="return_to" value="{{ return_to }}">
+          <input type="hidden" name="lesson_date" value="{{ lesson.lesson_date.isoformat() }}">
+          <input type="hidden" name="lesson_time" value="{{ lesson.start_time }}">
+          <input type="hidden" name="program_id" value="{{ lesson.program_id }}">
+          <input type="hidden" name="program_name" value="{{ lesson.program_name }}">
+          <div class="muted" style="font-size:12px; line-height:1.5;">
+            この週はまだ予約開放されていません。<br>
+            対象日の 7 日前 09:00 に自動で予約を取りにいく<b>予約予定</b>を登録できます。
+          </div>
+          <label class="field-label">希望席（クリックで優先順位、もう一度で解除）</label>
+          <div class="seat-grid" id="intent-seat-grid" data-capacity="35"></div>
+          <input type="hidden" name="seat_preferences" id="intent-seat-input">
+          <div class="muted" style="font-size:11px;">開放日 9:00 に、この順番で席を試します。</div>
+        </form>
       {% else %}
         <form method="post" action="{{ url_for('reserve_create') }}" id="reserve-form" class="stack stack-sm">
           <input type="hidden" name="studio_lesson_id" value="{{ lesson.studio_lesson_id }}">
@@ -179,14 +207,17 @@
           <form method="post" action="{{ url_for('reserve_cancel', reservation_id=lesson.reserved_reservation_id) }}"
                 onsubmit="return confirm('{{ lesson.program_name }} の予約を取り消しますか？');" style="flex:1;">
             <input type="hidden" name="return_to" value="{{ return_to }}">
-            <button class="btn btn--danger-ghost" type="submit" style="width:100%;">取消</button>
+            <button class="btn btn--danger-ghost" type="submit" style="width:100%;" data-loading-text="取消中…">取消</button>
           </form>
-          <button class="btn btn--primary" form="reserve-form" type="submit">席を変更</button>
-        {% elif lesson.state.value in ['full', 'unreservable'] %}
+          <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="変更中…">席を変更</button>
+        {% elif lesson.state.value == 'full' or (lesson.state.value == 'unreservable' and lesson.lesson_date < today) %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}" style="flex:1;justify-content:center;">閉じる</a>
+        {% elif lesson.state.value == 'unreservable' %}
+          <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
+          <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="登録中…">予約予定を登録</button>
         {% else %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
-          <button class="btn btn--primary" form="reserve-form" type="submit">予約する</button>
+          <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="予約中…">予約する</button>
         {% endif %}
       </div>
     {% else %}
@@ -206,7 +237,7 @@
 {% block head_extra %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  // seat radio のクリックで submit（UI シンプル化）
+  // 通常の radio 形式の座席（単発予約・席変更）
   document.querySelectorAll('.seat-grid label.seat').forEach(function(label) {
     label.addEventListener('click', function(ev) {
       var input = label.querySelector('input[type=radio]');
@@ -217,6 +248,69 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         label.classList.add('seat--selected');
       }
+    });
+  });
+
+  // 予約予定（Intent）用: ランク付けグリッド
+  var intentGrid = document.getElementById('intent-seat-grid');
+  var intentInput = document.getElementById('intent-seat-input');
+  if (intentGrid && intentInput) {
+    var cap = parseInt(intentGrid.dataset.capacity || '35', 10);
+    var ranks = new Map();
+    function render() {
+      intentGrid.innerHTML = '';
+      for (var i = 1; i <= cap; i++) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seat';
+        if (ranks.has(i)) btn.classList.add('seat--rank');
+        var no = i;
+        btn.addEventListener('click', (function(num) { return function() {
+          if (ranks.has(num)) {
+            var r = ranks.get(num); ranks.delete(num);
+            for (var entry of Array.from(ranks)) {
+              if (entry[1] > r) ranks.set(entry[0], entry[1] - 1);
+            }
+          } else {
+            ranks.set(num, ranks.size + 1);
+          }
+          render(); sync();
+        }; })(no));
+        if (ranks.has(no)) {
+          var badge = document.createElement('span');
+          badge.className = 'seat-rank-badge';
+          badge.textContent = ranks.get(no);
+          btn.appendChild(badge);
+        }
+        btn.appendChild(document.createTextNode(('0' + no).slice(-2)));
+        intentGrid.appendChild(btn);
+      }
+    }
+    function sync() {
+      var arr = Array.from(ranks.entries()).sort(function(a,b){return a[1]-b[1];}).map(function(e){return e[0];});
+      intentInput.value = arr.join(',');
+    }
+    render(); sync();
+  }
+
+  // 全フォームの submit 時に、ボタンを disable + ローディング文言にする
+  document.querySelectorAll('form').forEach(function(form) {
+    form.addEventListener('submit', function() {
+      form.querySelectorAll('button[type=submit]').forEach(function(btn) {
+        var lbl = btn.getAttribute('data-loading-text');
+        if (lbl) { btn.textContent = lbl; }
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+      });
+      // form 外から flag された submit ボタン (form="reserve-form") もカバー
+      document.querySelectorAll('button[form]').forEach(function(btn) {
+        if (btn.getAttribute('form') === form.id) {
+          var lbl = btn.getAttribute('data-loading-text');
+          if (lbl) { btn.textContent = lbl; }
+          btn.disabled = true;
+          btn.style.opacity = '0.7';
+        }
+      });
     });
   });
 });

@@ -15,6 +15,7 @@ from db.schema import (
     INITIAL_SCHEMA,
     SCHEMA_VERSION,
     SEED_STUDIO_SQL,
+    V3_SETUP,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ def run_migrations(db_path: Path) -> None:
         if version < 2:
             for sql, params in V2_UPDATES:
                 connection.execute(sql, params)
+        if version < 3:
+            for sql in V3_SETUP:
+                connection.execute(sql)
         connection.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
             (SCHEMA_VERSION,),
