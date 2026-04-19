@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+from app.adapters.public_monthly_mapper import collect_closed_dates
 from app.domain.entities import (
     CalendarCell,
     CalendarWeek,
@@ -21,9 +22,10 @@ from app.domain.entities import (
     SeatMap,
     Studio,
 )
+from app.domain.entities import IntentStatus
 from app.domain.ports import ReservationGateway
 from config.settings import Settings
-from db.repositories import recurring_repo, reservation_repo
+from db.repositories import intent_repo, recurring_repo, reservation_repo
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +63,32 @@ class CalendarQueryService:
         # 予約 API の公開範囲（今日〜+6 日）内は reserve API、範囲外は公開月間 API
         open_until = today + timedelta(days=6)
         out_of_range = week_start > open_until
+        closed_days: list[date] = []
         lessons: list[Lesson] = []
         if not out_of_range:
             lessons = self._gateway.fetch_week(studio.ref, week_start, days=7)
             self._annotate_reserved_state(lessons)
+            # 今週画面でも金曜定休日・祝日特別日を「休館」として表示したい。
+            # 公開月間 API 経由で closed_dates を取得（gateway キャッシュがあるので軽い）。
+            closed_days = self._fetch_closed_days(studio, week_start)
         else:
-            # 未開放週は公開月間 API から取得、state=AVAILABLE のまま（予約予定として扱う）
+            # 未開放週は公開月間 API から取得する。公開月間 API には座席レイアウト
+            # 情報が含まれないため、先に reserve API（今日〜+6 日）を叩いて
+            # gateway 側の `_weekday_time_space` / `_space_index` を温めておく。
+            # これにより、同一店舗・同一曜日・同一時刻の lesson に対して同じ
+            # studio_room_space_id とレイアウトを復元できる。
+            # gateway に 30 秒 TTL キャッシュがあるため、同一リクエスト内の重複
+            # 呼び出しは実害なし。
+            try:
+                self._gateway.fetch_week(studio.ref, today)
+            except Exception as exc:  # noqa: BLE001 - warmup 失敗は致命ではない
+                logger.warning("calendar warmup fetch_week failed: %s", exc)
             lessons = self._fetch_public_monthly_week(studio, week_start)
+            closed_days = self._fetch_closed_days(studio, week_start)
+            # out_of_range でも recurring が当たる lesson は TARGET 化する。
+            # reserve API 経路と違い、reservation / FULL / UNRESERVABLE の判定材料はない。
+            self._annotate_recurring_state(lessons)
+        self._annotate_intent_state(lessons)
         logger.info(
             "build_week studio=%s week=%s out_of_range=%s lessons=%d",
             studio.display_name, week_start, out_of_range, len(lessons),
@@ -104,6 +125,7 @@ class CalendarQueryService:
             open_days=7,
             open_until=open_until,
             out_of_range=out_of_range,
+            closed_dates=closed_days,
         )
 
     def _fetch_public_monthly_week(
@@ -153,27 +175,56 @@ class CalendarQueryService:
                 )
         return results
 
+    def _fetch_closed_days(self, studio: Studio, week_start: date) -> list[date]:
+        """公開月間 API の pims_closed から、週内の休館日を抽出する。
+
+        gateway にキャッシュ付き `fetch_closed_days` があるのでそれを使う。
+        毎リクエストで公開月間 API を叩かないよう、月単位で cache する。
+        """
+
+        if not studio.club_code or not studio.sisetcd:
+            return []
+        if not hasattr(self._gateway, "fetch_closed_days"):
+            return []
+        week_end = week_start + timedelta(days=6)
+        months: set[tuple[int, int]] = set()
+        cur = week_start
+        while cur <= week_end:
+            months.add((cur.year, cur.month))
+            cur += timedelta(days=1)
+        all_closed: set[date] = set()
+        for year, month in sorted(months):
+            try:
+                month_closed = self._gateway.fetch_closed_days(  # type: ignore[attr-defined]
+                    club_code=studio.club_code,
+                    sisetcd=studio.sisetcd,
+                    year=year,
+                    month=month,
+                )
+                all_closed.update(month_closed)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "fetch_closed_days failed year=%d month=%d: %s", year, month, exc
+                )
+        return sorted(d for d in all_closed if week_start <= d <= week_end)
+
     # --- 内部 -------------------------------------------------------
 
     def _annotate_reserved_state(self, lessons: list[Lesson]) -> None:
+        """reserve API 経路向けの annotate。
+
+        reservation > recurring (TARGET) > FULL > UNRESERVABLE > AVAILABLE の
+        優先順位で state を確定する。intent の付与は別メソッド
+        `_annotate_intent_state` で行う。
+        """
+
         reservations = reservation_repo.list_reservations(self._db_path)
         reservation_index = {
             (r.studio_lesson_id, r.lesson_date, r.lesson_time): r
             for r in reservations
             if r.studio_lesson_id
         }
-        recurring_items = recurring_repo.list_recurring(self._db_path)
-        recurring_index = {
-            (
-                r.day_of_week,
-                r.start_time,
-                r.program_id,
-                r.studio_id,
-                r.studio_room_id,
-            ): r
-            for r in recurring_items
-            if r.status is RecurringStatus.ACTIVE
-        }
+        recurring_index = self._build_recurring_index()
         for lesson in lessons:
             key = (lesson.studio_lesson_id, lesson.lesson_date, lesson.start_time)
             reservation = reservation_index.get(key)
@@ -199,6 +250,109 @@ class CalendarQueryService:
                 lesson.state = LessonState.UNRESERVABLE
             else:
                 lesson.state = LessonState.AVAILABLE
+
+    def _annotate_recurring_state(self, lessons: list[Lesson]) -> None:
+        """公開月間 API 経路向け：recurring に一致する lesson を TARGET 化する。
+
+        reservation / FULL / UNRESERVABLE の判定材料がないため、recurring に
+        一致しない lesson は state=AVAILABLE のまま残る。
+
+        公開月間 API の `progcd` と reserve API の `program_id` は値が異なる
+        ことがある（別コード体系）。そのため、曜日+時刻+program_id で引いて
+        ヒットしなければ、曜日+時刻+program_name で再照合する。
+        """
+
+        recurring_items = [
+            r for r in recurring_repo.list_recurring(self._db_path)
+            if r.status is RecurringStatus.ACTIVE
+        ]
+        if not recurring_items:
+            return
+        id_index = {
+            (r.day_of_week, r.start_time, r.program_id, r.studio_id, r.studio_room_id): r
+            for r in recurring_items
+        }
+        name_index = {
+            (r.day_of_week, r.start_time, r.program_name, r.studio_id, r.studio_room_id): r
+            for r in recurring_items
+        }
+        # 曜日+時刻+studio だけで引く弱い索引。公開月間 API の progcd/prognm と
+        # reserve API の program_id/program_name が週ごとに異なる（CS Live 系
+        # ビュープロのようにサブプログラムが週替わり）場合の救済。
+        # 同じ店舗・同じ曜日・同じ時刻には通常 1 種類のプログラムしか並ばない
+        # という前提に基づくため、false positive は実運用上ほぼ発生しない。
+        studio_index = {
+            (r.day_of_week, r.start_time, r.studio_id, r.studio_room_id): r
+            for r in recurring_items
+        }
+        for lesson in lessons:
+            if lesson.state is LessonState.RESERVED:
+                continue
+            studio_tuple = (lesson.studio_id, lesson.studio_room_id)
+            id_key = (
+                lesson.lesson_date.weekday(),
+                lesson.start_time,
+                lesson.program_id,
+                *studio_tuple,
+            )
+            name_key = (
+                lesson.lesson_date.weekday(),
+                lesson.start_time,
+                lesson.program_name,
+                *studio_tuple,
+            )
+            studio_key = (
+                lesson.lesson_date.weekday(),
+                lesson.start_time,
+                *studio_tuple,
+            )
+            if id_key in id_index or name_key in name_index or studio_key in studio_index:
+                lesson.state = LessonState.TARGET
+
+    def _build_recurring_index(self) -> dict[tuple[int, str, str, str | None, str | None], object]:
+        """ACTIVE な定期予約を (曜日, 時刻, プログラム, スタジオ, ルーム) で索引化する。"""
+
+        recurring_items = recurring_repo.list_recurring(self._db_path)
+        return {
+            (
+                r.day_of_week,
+                r.start_time,
+                r.program_id,
+                r.studio_id,
+                r.studio_room_id,
+            ): r
+            for r in recurring_items
+            if r.status is RecurringStatus.ACTIVE
+        }
+
+    def _annotate_intent_state(self, lessons: list[Lesson]) -> None:
+        """予約予定（Intent）登録済みのレッスンに intent_id を付与する。"""
+
+        intents = intent_repo.list_intents(
+            self._db_path, status=IntentStatus.PENDING
+        )
+        intent_index = {
+            (
+                i.lesson_date,
+                i.lesson_time,
+                i.program_id,
+                i.studio_id,
+                i.studio_room_id,
+            ): i
+            for i in intents
+        }
+        for lesson in lessons:
+            key = (
+                lesson.lesson_date,
+                lesson.start_time,
+                lesson.program_id,
+                lesson.studio_id,
+                lesson.studio_room_id,
+            )
+            intent = intent_index.get(key)
+            if intent is not None:
+                lesson.intent_id = intent.id
+                lesson.intent_seat_preferences = list(intent.seat_preferences)
 
     def _to_cell_map(
         self,
@@ -251,6 +405,7 @@ class CalendarQueryService:
             return self._gateway.fetch_seat_map(
                 lesson.studio_lesson_id,
                 capacity_hint=lesson.capacity,
+                studio_room_space_id=lesson.studio_room_space_id,
             )
         except Exception as exc:  # noqa: BLE001 - UI を落とさない
             logger.warning(

@@ -11,8 +11,10 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.deps import AppContext
+from scheduler.jobs.cache_refresh import cache_refresh_job
 from scheduler.jobs.daily_sync import daily_sync_job
 from scheduler.jobs.monthly_sync import monthly_sync_job
 from scheduler.jobs.retention import retention_job
@@ -60,12 +62,25 @@ def start_scheduler(context: AppContext) -> BackgroundScheduler:
         replace_existing=True,
     )
 
+    # 2 分毎に reserve API 窓のキャッシュを温め直す。ユーザーからのアクセス時に
+    # ほぼ常に cache hit させ、schedule 再取得のスパイク（300-500ms）を隠す。
+    scheduler.add_job(
+        cache_refresh_job,
+        trigger=IntervalTrigger(minutes=2),
+        args=[context],
+        id="cache_refresh",
+        name="キャッシュ温め直し（2 分毎）",
+        replace_existing=True,
+    )
+
     scheduler.add_job(
         monthly_sync_job,
-        trigger=CronTrigger(day=1, hour=3, minute=0),
+        # 公開月間 API は認証不要で IP ベースしか追跡されない公開 JSONP なので
+        # 毎日叩いて座席レイアウト（_weekday_time_space）を更新する。
+        trigger=CronTrigger(hour=3, minute=0),
         args=[context],
         id="monthly_sync",
-        name="月次スケジュール同期",
+        name="月次スケジュール同期（公開月間 API、日次）",
         replace_existing=True,
     )
 

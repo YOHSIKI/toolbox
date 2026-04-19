@@ -58,12 +58,16 @@ class BookingIntentService:
         self._settings = settings
 
     def compute_run_at(self, lesson_date: date) -> datetime:
-        """予約開放は対象日の 7 日前 9:00。"""
+        """予約開放は対象日の 6 日前 9:00。
+
+        hacomono の `schedule_open_days=7` は「今日含む 7 日間」を公開する仕様なので、
+        9:00 に新規解放されるのは `today + 6` の日付。逆算すると、対象レッスンの
+        予約実行タイミングは `lesson_date - 6 日` の 9:00。
+        例: 4/25 (土) のレッスン → 4/19 (日) 09:00 に実行。
+        """
 
         return datetime.combine(
-            lesson_date - timedelta(days=self._settings.calendar_start_hour - 9 + 7)
-            if False
-            else (lesson_date - timedelta(days=7)),
+            lesson_date - timedelta(days=6),
             time(self._settings.run_hour, self._settings.run_minute),
         )
 
@@ -121,10 +125,34 @@ class BookingIntentService:
             raise NotFound(f"intent {intent_id} not found")
         intent_repo.update_status(self._db_path, intent_id, IntentStatus.CANCELLED)
 
-    def execute_due(self, *, today: date) -> list[IntentRunResult]:
-        """本日までに開放された（予約すべき）intent をすべて実行。"""
+    def update_seats(self, intent_id: str, seat_preferences: list[int]) -> BookingIntent:
+        """登録済み intent の希望席だけを更新する（取り消し→再登録を不要にする）。"""
+
+        intent = intent_repo.get_intent(self._db_path, intent_id)
+        if intent is None:
+            raise NotFound(f"intent {intent_id} not found")
+        if intent.status is not IntentStatus.PENDING:
+            raise NotFound(f"intent {intent_id} is not editable (status={intent.status.value})")
+        intent_repo.update_seat_preferences(self._db_path, intent_id, seat_preferences)
+        intent.seat_preferences = list(seat_preferences)
+        return intent
+
+    def execute_due(
+        self,
+        *,
+        today: date,
+        target_date: date | None = None,
+    ) -> list[IntentRunResult]:
+        """本日までに開放された（予約すべき）intent をすべて実行。
+
+        ``target_date`` が指定された場合は ``intent.lesson_date`` が一致するものだけ
+        実行する。9:00 ジョブから呼ぶ際に「その日新規解放された日」だけに絞るための
+        フィルタ。未指定時は従来通り全件実行する（互換性維持）。
+        """
 
         runnable = intent_repo.list_runnable_on(self._db_path, today)
+        if target_date is not None:
+            runnable = [i for i in runnable if i.lesson_date == target_date]
         results: list[IntentRunResult] = []
         for intent in runnable:
             results.append(self._execute_one(intent))

@@ -241,9 +241,10 @@ h4 { font-size: 13px; }
 }
 
 .content {
-  padding: var(--space-6) var(--space-8);
-  max-width: 1600px;
+  padding: var(--space-4) var(--space-6);
   width: 100%;
+  /* カレンダー/カード/テーブル中心の UI なので max-width は付けず画面幅をフル活用。
+     縦書き長文はほぼ無く、行長が伸びて読みづらくなる懸念は小さい。 */
 }
 
 /* ========================================
@@ -257,7 +258,7 @@ h4 { font-size: 13px; }
 }
 
 .card-header {
-  padding: var(--space-4) var(--space-5);
+  padding: 10px var(--space-4);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -443,7 +444,7 @@ h4 { font-size: 13px; }
   border: 1px solid var(--border);
   border-left: 3px solid var(--success);
   border-radius: var(--radius-md);
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-3) var(--space-5);
 }
 .summary--warning { border-left-color: var(--warning); }
 .summary--danger  { border-left-color: var(--danger); }
@@ -453,19 +454,19 @@ h4 { font-size: 13px; }
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 .summary-eyebrow {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .summary-title {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -485,10 +486,10 @@ h4 { font-size: 13px; }
   display: grid;
   grid-template-columns: 20px 1fr;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: 8px var(--space-3);
   background: var(--surface-sunken);
   border-radius: var(--radius-sm);
-  align-items: start;
+  align-items: center;
 }
 .summary-item-icon {
   width: 16px;
@@ -498,6 +499,18 @@ h4 { font-size: 13px; }
 .summary-item--success .summary-item-icon { color: var(--success); }
 .summary-item--warning .summary-item-icon { color: var(--warning); }
 .summary-item--danger  .summary-item-icon { color: var(--danger); }
+
+.summary-item--cancelled {
+  background: var(--surface-sunken);
+  border-left: 3px solid var(--text-muted);
+}
+.summary-item--cancelled .summary-item-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.summary-item--cancelled .summary-item-icon {
+  color: var(--text-muted);
+}
 
 .summary-item-title {
   font-weight: 600;
@@ -515,7 +528,9 @@ h4 { font-size: 13px; }
    ======================================== */
 .grid-2col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* ダッシュボードの「現在の予約 / 予約予定 / 予約履歴」を横 3 列に並べて、
+     縦スクロールが発生しないよう全部 1 画面内に収める */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-5);
 }
 
@@ -562,9 +577,21 @@ h4 { font-size: 13px; }
   display: flex;
   flex-direction: column;
 }
+.log-list {
+  display: flex;
+  flex-direction: column;
+}
+/* リストに収まらない残件数の案内 */
+.list-more {
+  padding: 6px var(--space-5) 10px;
+  font-size: 11px;
+  text-align: right;
+}
 
 .list-row {
-  padding: var(--space-4) var(--space-5);
+  /* ダッシュボードを 1 画面に収めるため、各行を細く詰める */
+  padding: 6px var(--space-4);
+  line-height: 1.35;
   border-bottom: 1px solid var(--border);
   display: grid;
   grid-template-columns: 72px 1fr auto;
@@ -591,8 +618,8 @@ h4 { font-size: 13px; }
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  line-height: 1.4;
-  margin-bottom: 2px;
+  line-height: 1.35;
+  margin-bottom: 1px;
 }
 
 .list-meta {
@@ -600,7 +627,8 @@ h4 { font-size: 13px; }
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .list-meta-dot {
@@ -615,6 +643,12 @@ h4 { font-size: 13px; }
 }
 .list-row:hover .list-actions {
   opacity: 1;
+}
+.list-status {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  white-space: nowrap;
 }
 
 /* ========================================
@@ -696,9 +730,9 @@ h4 { font-size: 13px; }
    dashboard — log feed
    ======================================== */
 .log-row {
-  padding: var(--space-3) var(--space-5);
+  padding: 6px var(--space-4);
   display: grid;
-  grid-template-columns: 16px 80px 1fr;
+  grid-template-columns: 12px 120px 1fr;
   gap: var(--space-3);
   align-items: center;
   font-size: 12px;
@@ -1075,7 +1109,6 @@ h4 { font-size: 13px; }
 .lesson--full .lesson-name,
 .lesson--full .lesson-sub {
   color: var(--text-faint);
-  text-decoration: line-through;
 }
 /* カレンダー上で現在パネルに表示中のレッスンを視覚的に強調 */
 .lesson--is-selected {
@@ -1087,12 +1120,21 @@ h4 { font-size: 13px; }
   transform: translateY(-1px);
 }
 
+/* 定期予約登録（target）: 青系。まだ予約が取れていない将来の枠 */
 .lesson--target {
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-soft-border);
-  border-left: 3px solid var(--accent);
+  background: #eef4ff;
+  border: 1px solid #c7dbff;
+  border-left: 3px solid #1d4ed8;
 }
-.lesson--target .lesson-name { color: var(--accent); }
+.lesson--target .lesson-name { color: #1d4ed8; }
+
+/* 予約実行待ち（intent 登録済み）: 黄色系 */
+.lesson--pending-intent {
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  border-left: 3px dashed #b45309;
+}
+.lesson--pending-intent .lesson-name { color: #b45309; }
 
 .lesson-star {
   position: absolute;
@@ -1101,6 +1143,10 @@ h4 { font-size: 13px; }
   font-size: 10px;
   color: var(--accent);
 }
+/* 状態色に合わせて ★/◎ の色も切り替える */
+.lesson--target .lesson-star         { color: #1d4ed8; }  /* 定期予約登録（青） */
+.lesson--reserved .lesson-star       { color: var(--success); }  /* 予約済み＋定期（緑） */
+.lesson--pending-intent .lesson-star { color: #b45309; }  /* 予約実行待ち（黄背景に濃茶） */
 
 .cell-empty {
   color: var(--text-faint);
@@ -1122,9 +1168,95 @@ h4 { font-size: 13px; }
    ======================================== */
 .layout-with-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 480px);
   gap: var(--space-5);
   align-items: start;
+}
+
+.cal-head--closed {
+  background: var(--surface-sunken);
+}
+.cal-head-closed-badge {
+  display: inline-block;
+  font-size: 9px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: var(--text-faint);
+  color: var(--surface);
+  letter-spacing: 0.04em;
+}
+
+/* ========================================
+   notice (お知らせカード) — プログラム変更等のソフトな通知
+   ======================================== */
+.notice {
+  background: var(--surface);
+  border: 1px solid var(--accent-soft-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  margin-bottom: var(--space-5);
+}
+.notice-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+}
+.notice-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.notice-title {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  color: var(--text);
+}
+.notice-body {
+  padding: 6px var(--space-4) 8px;
+}
+.notice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--border);
+}
+.notice-row:last-of-type {
+  border-bottom: none;
+}
+.notice-when {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 130px;
+  flex-shrink: 0;
+}
+.notice-diff {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.notice-from {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.notice-arrow {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.notice-to {
+  color: var(--text);
+  font-weight: 500;
+}
+.notice-actions {
+  padding-top: var(--space-3);
 }
 
 .panel {
@@ -1216,6 +1348,23 @@ h4 { font-size: 13px; }
   gap: 4px;
 }
 
+/* 実データの coord_x / coord_y を使った座席配置。
+   各 .seat は inline style で grid-column / grid-row が付く。
+   grid-auto-flow: dense で、明示的に配置されなかった残セルを詰めさせる。 */
+.seat-grid--layout {
+  display: grid;
+  gap: 6px;
+  grid-auto-flow: dense;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.seat-grid--layout .seat {
+  height: 36px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
 .seat {
   height: 28px;
   border-radius: 4px;
@@ -1304,7 +1453,8 @@ h4 { font-size: 13px; }
   height: 12px;
   border-radius: 3px;
 }
-.legend-swatch--available { background: var(--surface);      border: 1px solid var(--border); }
-.legend-swatch--reserved  { background: var(--success-soft);  border: 1px solid #bbf7d0; border-left: 3px solid var(--success); }
-.legend-swatch--target    { background: var(--accent-soft);   border: 1px solid var(--accent-soft-border); border-left: 3px solid var(--accent); }
-.legend-swatch--full      { background: var(--surface-sunken); border: 1px solid var(--border); }
+.legend-swatch--available      { background: var(--surface);      border: 1px solid var(--border); }
+.legend-swatch--reserved       { background: var(--success-soft);  border: 1px solid #bbf7d0; border-left: 3px solid var(--success); }
+.legend-swatch--pending-intent { background: #fefce8;             border: 1px solid #fde68a; border-left: 3px dashed #b45309; }
+.legend-swatch--target         { background: #eef4ff;             border: 1px solid #c7dbff; border-left: 3px solid #1d4ed8; }
+.legend-swatch--full           { background: var(--surface-sunken); border: 1px solid var(--border); }

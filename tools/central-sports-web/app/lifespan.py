@@ -36,6 +36,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         scheduler = start_scheduler(context)
         app.state.scheduler = scheduler
         logger.info("scheduler started")
+
+        # 起動直後にキャッシュを事前ウォーム化する。ブラウザからの最初の
+        # ダッシュボード / 予約画面アクセスで schedule API を叩くのを避けるため、
+        # バックグラウンドスレッドで非同期実行（app の起動を遅らせない）。
+        import threading
+        from scheduler.jobs.cache_refresh import cache_refresh_job
+
+        def _warm() -> None:
+            try:
+                cache_refresh_job(context)
+                logger.info("initial cache warmup done")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("initial cache warmup failed: %s", exc)
+
+        threading.Thread(target=_warm, name="cache-warmup", daemon=True).start()
     else:
         logger.info("scheduler disabled (enabled=%s, configured=%s)", settings.scheduler_enabled, context.is_fully_configured)
 

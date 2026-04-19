@@ -1,0 +1,6 @@
+{#
+  HTMX 部分更新用の空レイアウト。
+  base.html の {% block content %} 部分だけを返す。
+  `head_extra` や `content_stack` 等のブロックは出力されない（HTMX swap 後もそのまま動く JS は inline に書く or 既に読み込み済みのを使う方針）。
+#}
+{% block content %}{% endblock %}

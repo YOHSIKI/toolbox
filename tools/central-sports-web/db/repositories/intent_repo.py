@@ -140,3 +140,20 @@ def update_status(
 def delete_intent(db_path: Path, intent_id: str) -> None:
     with write_transaction(db_path) as con:
         con.execute("DELETE FROM booking_intents WHERE id = ?", (intent_id,))
+
+
+def update_seat_preferences(
+    db_path: Path, intent_id: str, seats: list[int]
+) -> None:
+    """希望席の優先順位だけを差し替える（status / lesson_date 等は触らない）。"""
+
+    with write_transaction(db_path) as con:
+        con.execute(
+            """
+            UPDATE booking_intents
+               SET seat_preferences = ?,
+                   updated_at = datetime('now')
+             WHERE id = ?
+            """,
+            (json.dumps(seats, ensure_ascii=False), intent_id),
+        )

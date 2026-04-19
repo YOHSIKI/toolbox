@@ -46,7 +46,9 @@ class SessionWarmupService:
 
         targets_by_studio: dict[StudioRef, list[str]] = {}
         if ok:
-            target_date = today + timedelta(days=7)
+            # schedule_open_days=7 は「今日〜今日+6 日」の 7 日間を開放する仕様のため、
+            # 9:00 に新規解放されるのは today + 6 日の日付
+            target_date = today + timedelta(days=6)
             active = [
                 r
                 for r in recurring_repo.list_recurring(self._db_path)

@@ -13,6 +13,7 @@ from app.deps import AppContext, get_context
 from app.domain.errors import NotFound
 from app.routes._shared import resolve_current_studio
 from app.services.calendar_query import Selection, resolve_week_start
+from app.templating import render_page
 from db.repositories import studio_repo
 
 router = APIRouter()
@@ -74,7 +75,8 @@ def reserve_calendar(
     prev_week = (week_start - timedelta(weeks=1)).isoformat()
     next_week = (week_start + timedelta(weeks=1)).isoformat()
 
-    return templates.TemplateResponse(
+    return render_page(
+        templates,
         request,
         "reserve_calendar.html",
         {

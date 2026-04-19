@@ -12,6 +12,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', path='/img/favicon-192.png') }}">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='/img/favicon-192.png') }}">
   <link rel="shortcut icon" href="{{ url_for('static', path='/img/favicon.ico') }}">
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
   <script>
     // フォーム submit 時、送信ボタンを disable + ラベル切替して連打と実行中表示を統一
     document.addEventListener('DOMContentLoaded', function() {
@@ -39,7 +40,7 @@
     {% include "partials/sidebar.html" %}
     <main class="main">
       {% include "partials/topbar.html" %}
-      <section class="content stack {% block content_stack %}stack-md{% endblock %}">
+      <section id="hx-main" class="content stack {% block content_stack %}stack-md{% endblock %}">
         {% block content %}{% endblock %}
       </section>
     </main>

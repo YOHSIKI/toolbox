@@ -3,6 +3,55 @@
 <header class="topbar">
   <div class="topbar-title">{{ topbar_title|default('') }}</div>
   <div class="topbar-actions">
+    <form id="topbar-sync-form" method="post" action="{{ url_for('sync_now') }}" style="display:inline;">
+      <button class="btn" type="submit" data-loading-text="同期中…" title="マイページの予約を取り込む">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        マイページと同期
+      </button>
+    </form>
+    <script>
+    // 同期はページ遷移せずに fetch で投げ、完了したら現在の URL を再読込する。
+    // これでダッシュボードに強制リダイレクトされず、予約画面にいれば予約画面のまま更新される。
+    (function() {
+      var form = document.getElementById('topbar-sync-form');
+      if (!form) return;
+      form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        if (!window.confirm('マイページの予約情報を取り込みます。よろしいですか？')) return;
+        var btn = form.querySelector('button[type=submit]');
+        var origText = btn.textContent.trim();
+        if (btn) {
+          btn.disabled = true;
+          var lbl = btn.getAttribute('data-loading-text');
+          if (lbl) btn.textContent = lbl;
+          btn.style.opacity = '0.7';
+        }
+        fetch(form.action, { method: 'POST', redirect: 'manual', credentials: 'same-origin' })
+          .then(function(res) {
+            // redirect:manual だと 303 は type='opaqueredirect'、同一 origin の 200 系は ok
+            if (res.type === 'opaqueredirect' || res.ok) {
+              window.location.reload();
+              return;
+            }
+            alert('同期に失敗しました（status ' + res.status + '）');
+          })
+          .catch(function(err) {
+            alert('同期に失敗しました: ' + err);
+          })
+          .finally(function() {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = origText;
+              btn.style.opacity = '';
+            }
+          });
+      });
+    })();
+    </script>
     {% if studios and studios|length > 1 %}
       <form method="post" action="{{ url_for('switch_studio') }}" style="display:inline;">
         <input type="hidden" name="next_url" value="{{ next_url|default('/') }}">

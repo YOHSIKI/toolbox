@@ -37,9 +37,16 @@ class ReservationGateway(Protocol):
     def fetch_seat_map(
         self,
         studio_lesson_id: int,
+        *,
         capacity_hint: int | None = None,
+        studio_room_space_id: int | None = None,
     ) -> SeatMap:
-        """指定レッスンの座席埋まり状況を取得する。capacity は別経路（schedule）から。"""
+        """指定レッスンの座席埋まり状況と配置を取得する。
+
+        - `capacity_hint` は schedule API 経由で既に分かっている定員のヒント
+        - `studio_room_space_id` を渡すと、space_details から `positions` を復元する
+          （空き席の飛び番号や coord_x/coord_y を UI に反映するため）
+        """
 
     def attempt_reservation(
         self,

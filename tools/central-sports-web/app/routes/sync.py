@@ -26,4 +26,12 @@ def sync_now(
         context.sync_reservations._last_sync_ts = time.monotonic()
     except Exception as exc:  # noqa: BLE001
         logger.warning("manual sync failed: %s", exc)
+    # 同期直後は「最新情報を見たい」という意図なので、gateway の週/月キャッシュを
+    # invalidate して次の画面描画で必ず再取得させる。学習済み座席配置 / hint は
+    # in-memory + DB に残るので表示速度は落ちない。
+    if context.gateway is not None:
+        try:
+            context.gateway.invalidate_caches()  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
     return RedirectResponse(url="/", status_code=303)

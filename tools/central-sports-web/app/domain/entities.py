@@ -113,6 +113,14 @@ class Lesson:
     reserved_seat_no: int | None = None
     reserved_origin: ReservationOrigin | None = None
     reserved_reservation_id: str | None = None
+    # 予約予定（Intent）が登録済みなら、そのレッスンに紐づく intent の id を入れる
+    intent_id: str | None = None
+    # 登録済み intent の現在の希望席（優先順位順）。編集画面で初期値として使う
+    intent_seat_preferences: list[int] = field(default_factory=list)
+    # 公開月間 API 由来の lesson ではここに progcd（hacomono 内部 ID, 例 "A0450"）
+    # を保存する。observed_lessons merge で program_id が reserve 側の数値 ID に
+    # 上書きされても、source_progcd は残り、後段の alias 学習・lookup で使う。
+    source_progcd: str | None = None
 
     @property
     def is_full(self) -> bool:
@@ -125,6 +133,21 @@ class Lesson:
         return self.lesson_date.weekday()
 
 
+@dataclass(slots=True, frozen=True)
+class SeatPosition:
+    """座席 1 個の論理番号・表示ラベル・グリッド座標。
+
+    - `no` は予約 API に送る内部連番（1..N）
+    - `no_label` は UI 表示用のラベル（"7"、"35" のように飛び飛びのこともある）
+    - `coord_x` / `coord_y` は studio_room_space の `space_details` から直接持ってくる
+    """
+
+    no: int
+    no_label: str
+    coord_x: int
+    coord_y: int
+
+
 @dataclass(slots=True)
 class SeatMap:
     """あるレッスンの座席埋まり状況。"""
@@ -132,6 +155,11 @@ class SeatMap:
     studio_lesson_id: int
     capacity: int
     taken_nos: list[int]
+    # 座席の詳細配置。space_details 未取得時は空リスト（既存呼び出し互換）
+    positions: list[SeatPosition] = field(default_factory=list)
+    # グリッド列数（coord_x の最大 + 1）。空間描画で使う
+    grid_cols: int = 0
+    grid_rows: int = 0
 
     @property
     def available_nos(self) -> list[int]:
@@ -266,6 +294,21 @@ class HistoryResult(str, Enum):
     FAILURE = "failure"
 
 
+class DailySummaryStatus(str, Enum):
+    """今朝の予約 1 件ごとの状態分類。
+
+    - RESERVED: 予約成功（有効）
+    - CANCELLED_AFTER_RESERVE: 予約成功後に取消（グレー表示）
+    - WARNING: 代替席で予約成功
+    - FAILED: 予約失敗
+    """
+
+    RESERVED = "reserved"
+    CANCELLED_AFTER_RESERVE = "cancelled"
+    WARNING = "warning"
+    FAILED = "failed"
+
+
 @dataclass(slots=True)
 class HistoryEntry:
     id: int | None
@@ -290,6 +333,7 @@ class DailySummaryItem:
     lesson_time: str
     result: HistoryResult
     detail: str
+    status: DailySummaryStatus = DailySummaryStatus.RESERVED
 
 
 @dataclass(slots=True)
@@ -299,6 +343,8 @@ class DailySummary:
     warning_count: int
     failure_count: int
     items: list[DailySummaryItem] = field(default_factory=list)
+    # 予約成功 → 取消、で差し引き消えた件数（UI 表示の文言に使う）
+    cancelled_count: int = 0
 
     @property
     def total_count(self) -> int:
@@ -327,12 +373,26 @@ class UpcomingReservation:
 class OccurrencePreview:
     lesson_date: date
     lesson_time: str
-    program_name: str
+    # schedule が未公開の週は None。テンプレート側で「未定」表示に分岐する
+    program_name: str | None
     instructor_name: str | None
     scheduled_run_at: datetime
     status: Literal["reserved", "waiting", "planned", "attention"]
     seat_no: int | None = None
     diff_flags: list[str] = field(default_factory=list)
+    alert_message: str | None = None
+
+
+@dataclass(slots=True)
+class ProgramChangeAlert:
+    """定期予約の今後の配置で、登録内容と実際のレッスンが食い違っている通知。"""
+
+    recurring_id: str
+    lesson_date: date
+    lesson_time: str
+    expected_name: str   # recurring に登録された program_name
+    actual_name: str     # schedule から取得した実データの program_name
+    diff_flags: list[str]
     alert_message: str | None = None
 
 
@@ -365,6 +425,8 @@ class CalendarWeek:
     open_days: int = 7
     out_of_range: bool = False
     open_until: date | None = None
+    # 当該週の休館日（公開月間 API の pims_closed から得る、予約 API 範囲では空）
+    closed_dates: list[date] = field(default_factory=list)
 
 
 # ------------------------------------------------------------

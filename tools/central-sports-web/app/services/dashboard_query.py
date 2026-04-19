@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.domain.entities import (
     BookingIntent,
     DailySummary,
     DailySummaryItem,
+    DailySummaryStatus,
     HistoryCategory,
     HistoryEntry,
     HistoryResult,
     IntentStatus,
+    ProgramChangeAlert,
     RecurringReservation,
     RecurringStatus,
     Reservation,
@@ -29,6 +33,11 @@ from db.repositories import (
     reservation_repo,
 )
 
+if TYPE_CHECKING:
+    from app.services.reserve_recurring import RecurringService
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class DashboardData:
@@ -37,12 +46,19 @@ class DashboardData:
     current_reservations: list[Reservation]
     upcoming: list[UpcomingReservation]
     history: list[HistoryEntry]
+    program_changes: list[ProgramChangeAlert] = field(default_factory=list)
 
 
 class DashboardQueryService:
-    def __init__(self, db_path: Path, settings: Settings) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        settings: Settings,
+        recurring_service: "RecurringService | None" = None,
+    ) -> None:
         self._db_path = db_path
         self._settings = settings
+        self._recurring_service = recurring_service
 
     def build(self, *, today: date, now: datetime) -> DashboardData:
         start_of_day = datetime.combine(today, time(0, 0))
@@ -51,7 +67,13 @@ class DashboardQueryService:
             self._db_path,
             start=start_of_day,
             end=end_of_day,
-            categories=[HistoryCategory.AUTOMATION, HistoryCategory.MANUAL],
+            categories=[
+                HistoryCategory.AUTOMATION,
+                HistoryCategory.MANUAL,
+                # マイページ側でキャンセルされた予約は sync 経路で
+                # reservation.cancel 履歴として残る。これもサマリーに反映させる。
+                HistoryCategory.SYNC_MY_RESERVATIONS,
+            ],
         )
         summary = self._summarize(todays_records, today=today)
 
@@ -78,13 +100,70 @@ class DashboardQueryService:
             categories=[HistoryCategory.AUTOMATION, HistoryCategory.MANUAL],
         )
 
+        program_changes = self._collect_program_changes(
+            recurring_items=recurring_items, today=today
+        )
+
         return DashboardData(
             today=today,
             daily_summary=summary,
             current_reservations=current,
             upcoming=upcoming,
             history=recent_history,
+            program_changes=program_changes,
         )
+
+    def _collect_program_changes(
+        self,
+        *,
+        recurring_items: list[RecurringReservation],
+        today: date,
+    ) -> list[ProgramChangeAlert]:
+        """定期予約の今後 4 週の配置プレビューから、差分ありかつ未予約の通知を集める。
+
+        reserve API / 公開月間 API を叩くため、失敗時は警告ログだけ出して空を返す。
+        ダッシュボードの他機能を巻き込まない。
+        """
+
+        if self._recurring_service is None:
+            return []
+        alerts: list[ProgramChangeAlert] = []
+        for item in recurring_items:
+            if item.status is not RecurringStatus.ACTIVE:
+                continue
+            try:
+                occurrences = self._recurring_service.build_occurrences(
+                    item, today=today, weeks=4
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "dashboard: build_occurrences failed for recurring %s: %s",
+                    item.id, exc,
+                )
+                continue
+            for occ in occurrences:
+                if not occ.diff_flags:
+                    continue
+                if occ.status == "reserved":
+                    continue
+                expected = item.program_name
+                actual = occ.program_name
+                # プログラム名が None / 空文字列のときは変更検知から除外
+                if not expected or not actual:
+                    continue
+                alerts.append(
+                    ProgramChangeAlert(
+                        recurring_id=item.id,
+                        lesson_date=occ.lesson_date,
+                        lesson_time=occ.lesson_time,
+                        expected_name=expected,
+                        actual_name=actual,
+                        diff_flags=list(occ.diff_flags),
+                        alert_message=occ.alert_message,
+                    )
+                )
+        alerts.sort(key=lambda a: (a.lesson_date, a.lesson_time))
+        return alerts
 
     # --- 内部 ------------------------------------------------------
 
@@ -94,12 +173,42 @@ class DashboardQueryService:
         *,
         today: date,
     ) -> DailySummary:
-        success = warning = failure = 0
-        items: list[DailySummaryItem] = []
+        """今朝の予約結果を 1 件 1 カード方式で集計する。
+
+        同じ (lesson_date, lesson_time, program_id) で reserve 成功 → cancel 成功
+        となったペアも、対消滅させずに「予約後に取消」ステータスの
+        カードとして items に残す。move（席変更）は結果に影響しないため無視する。
+        """
+
+        reserve_endpoints = {"reservation.create", "reservation.reserve"}
+        cancel_endpoints = {"reservation.cancel"}
+
+        def _key(meta: dict | None) -> tuple[str, str, str]:
+            meta = meta or {}
+            return (
+                str(meta.get("lesson_date", "")),
+                str(meta.get("lesson_time", "")),
+                str(meta.get("program_id", "")),
+            )
+
+        # 取消（成功）だけ数え、あとで reserve 成功とペアリングする
+        cancel_counts: dict[tuple[str, str, str], int] = {}
         for rec in records:
-            # 取消・席変更はサマリー対象外（「予約結果」ではないため）
-            if rec.endpoint in {"reservation.cancel", "reservation.move"}:
-                continue
+            if rec.endpoint in cancel_endpoints and rec.result is HistoryResult.SUCCESS:
+                k = _key(rec.metadata)
+                cancel_counts[k] = cancel_counts.get(k, 0) + 1
+
+        # reserve 系を時系列順に見て、成功のうちキャンセルされたものを識別
+        reserves_sorted = sorted(
+            (r for r in records if r.endpoint in reserve_endpoints),
+            key=lambda r: r.occurred_at,
+        )
+
+        # 同じ予約キー（date+time+program_id）の最終状態だけを 1 カードにまとめる。
+        # 同じレッスンを何度も reserve/cancel 繰り返しても、サマリーは 1 行で表現する。
+        items_by_key: dict[tuple[str, str, str], DailySummaryItem] = {}
+        for rec in reserves_sorted:
+            k = _key(rec.metadata)
             metadata = rec.metadata or {}
             program_name = str(metadata.get("program_name", "レッスン"))
             seat_no_raw = metadata.get("seat_no")
@@ -117,29 +226,51 @@ class DashboardQueryService:
                 except ValueError:
                     pass
             lesson_time = str(metadata.get("lesson_time", "09:00"))
-            detail = rec.message or ""
-            if rec.result is HistoryResult.SUCCESS:
-                success += 1
+
+            # ステータスを確定（件数は最後に items_by_key から集計する）
+            if rec.result is HistoryResult.SUCCESS and cancel_counts.get(k, 0) > 0:
+                # 予約成功 → 取消ペア: CANCELLED_AFTER_RESERVE
+                cancel_counts[k] -= 1
+                status = DailySummaryStatus.CANCELLED_AFTER_RESERVE
+                detail = "予約後に取り消しました"
+            elif rec.result is HistoryResult.SUCCESS:
+                status = DailySummaryStatus.RESERVED
+                detail = "予約成功"
             elif rec.result is HistoryResult.WARNING:
-                warning += 1
+                status = DailySummaryStatus.WARNING
+                detail = "代替席で予約"
             else:
-                failure += 1
-            items.append(
-                DailySummaryItem(
-                    program_name=program_name,
-                    seat_no=seat_no,
-                    lesson_date=lesson_date,
-                    lesson_time=lesson_time,
-                    result=rec.result,
-                    detail=detail,
-                )
+                status = DailySummaryStatus.FAILED
+                detail = rec.message or "予約できませんでした"
+
+            # 同一キーの後続イベントで上書き（最終状態が残る）
+            items_by_key[k] = DailySummaryItem(
+                program_name=program_name,
+                seat_no=seat_no,
+                lesson_date=lesson_date,
+                lesson_time=lesson_time,
+                result=rec.result,
+                detail=detail,
+                status=status,
             )
+
+        items = sorted(
+            items_by_key.values(),
+            key=lambda it: (it.lesson_date, it.lesson_time),
+        )
+        success = sum(1 for it in items if it.status is DailySummaryStatus.RESERVED)
+        warning = sum(1 for it in items if it.status is DailySummaryStatus.WARNING)
+        failure = sum(1 for it in items if it.status is DailySummaryStatus.FAILED)
+        cancelled = sum(
+            1 for it in items if it.status is DailySummaryStatus.CANCELLED_AFTER_RESERVE
+        )
         return DailySummary(
             date=today,
             success_count=success,
             warning_count=warning,
             failure_count=failure,
             items=items,
+            cancelled_count=cancelled,
         )
 
     def _build_upcoming(
@@ -172,8 +303,10 @@ class DashboardQueryService:
                 )
                 if key in occupied:
                     continue
+                # schedule_open_days=7 は「今日〜今日+6 日」の 7 日間開放なので、
+                # lesson_date に対する予約実行タイミングは lesson_date - 6 日の 9:00
                 run_at = datetime.combine(
-                    lesson_date - timedelta(days=7),
+                    lesson_date - timedelta(days=6),
                     time(run_hour, run_minute),
                 )
                 if run_at.date() < today:
@@ -211,7 +344,7 @@ class DashboardQueryService:
                     program_name=intent.program_name,
                     seat_preferences=list(intent.seat_preferences),
                     scheduled_run_at=intent.scheduled_run_at or datetime.combine(
-                        intent.lesson_date - timedelta(days=7), time(run_hour, run_minute)
+                        intent.lesson_date - timedelta(days=6), time(run_hour, run_minute)
                     ),
                 )
             )

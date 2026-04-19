@@ -1,10 +1,12 @@
-{% extends "base.html" %}
+{% extends hx_request|default(false) and "base_empty.html" or "base.html" %}
 {% block title %}定期予約 — central-sports-web{% endblock %}
 
 {% block content %}
 <div class="tabs">
-  <a class="tab {% if active_tab == 'single' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}">単発予約</a>
-  <a class="tab {% if active_tab == 'recurring' %}is-active{% endif %}" href="{{ url_for('recurring_list') }}">定期予約</a>
+  <a class="tab {% if active_tab == 'single' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}"
+     hx-get="{{ url_for('reserve_calendar') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">単発予約</a>
+  <a class="tab {% if active_tab == 'recurring' %}is-active{% endif %}" href="{{ url_for('recurring_list') }}"
+     hx-get="{{ url_for('recurring_list') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">定期予約</a>
 </div>
 
 {% if error %}
@@ -73,6 +75,7 @@
       </div>
       <div class="detail-actions">
         {% if current.status.value == 'active' %}
+          <button class="btn" type="button" onclick="document.getElementById('rec-edit-seats').open = !document.getElementById('rec-edit-seats').open;">希望席を編集</button>
           <form method="post" action="{{ url_for('recurring_pause', recurring_id=current.id) }}" style="display:inline;">
             <button class="btn" type="submit">一時停止</button>
           </form>
@@ -88,6 +91,48 @@
       </div>
     </div>
 
+    {% if current.status.value == 'active' %}
+    {% set current_seat_map = seat_maps.get(current.id) if seat_maps is defined else None %}
+    <details id="rec-edit-seats" class="detail-section" style="margin-top:12px;">
+      <summary style="cursor:pointer; font-weight:600;">希望席を編集</summary>
+      <form method="post" action="{{ url_for('recurring_update_seats', recurring_id=current.id) }}"
+            id="rec-edit-seats-form" class="stack stack-sm" style="margin-top:12px;"
+            data-default-capacity="35">
+        <input type="hidden" name="return_to" value="/reserve/recurring">
+        <div class="muted" style="font-size:12px; line-height:1.5;">
+          クリックで優先順位を付けます（もう一度クリックで解除）。
+          保存すると、今後の定期予約はこの順序で席を取りにいきます。
+        </div>
+        {% if current_seat_map and current_seat_map.positions %}
+          <div class="seat-grid seat-grid--layout"
+               style="grid-template-columns: repeat({{ current_seat_map.grid_cols or 7 }}, minmax(36px, 1fr));
+                      grid-template-rows: repeat({{ current_seat_map.grid_rows or 5 }}, 36px);"
+               id="rec-edit-seat-grid-layout"
+               data-ranks="{{ current.seat_preferences | join(',') }}">
+            {% for pos in current_seat_map.positions %}
+              <button type="button" class="seat" data-no="{{ pos.no }}"
+                      style="grid-column: {{ pos.coord_x + 1 }}; grid-row: {{ pos.coord_y + 1 }};">
+                {{ pos.no_label }}
+              </button>
+            {% endfor %}
+          </div>
+        {% else %}
+          {# 座席情報未取得のフォールバック: 1〜35 連番 #}
+          <div class="seat-grid" id="rec-edit-seat-grid"
+               data-ranks="{{ current.seat_preferences | join(',') }}"></div>
+        {% endif %}
+        <input type="hidden" name="seat_preferences" id="rec-edit-seat-input"
+               value="{{ current.seat_preferences | join(',') }}">
+        <div class="muted" style="font-size:11px;">開放日 9:00 に、この順番で席を試します。未設定の場合は空席を自動で選択します。</div>
+        <div class="row row-gap-sm" style="justify-content:flex-end; margin-top:8px;">
+          <button class="btn" type="button"
+                  onclick="document.getElementById('rec-edit-seats').open = false;">キャンセル</button>
+          <button class="btn btn--primary" type="submit" data-loading-text="保存中…">保存</button>
+        </div>
+      </form>
+    </details>
+    {% endif %}
+
     <div class="detail-section">
       <div class="detail-section-title">今後の配置</div>
       <div class="occurrences">
@@ -99,7 +144,14 @@
               <div class="occurrence-date-sub">{{ label }}</div>
             </div>
             <div>
-              <div class="occurrence-title">{{ occ.lesson_time }} {{ occ.program_name }}</div>
+              <div class="occurrence-title">
+                {{ occ.lesson_time }}
+                {% if occ.program_name %}
+                  {{ occ.program_name }}
+                {% else %}
+                  <span class="muted" style="font-weight:400;">（プログラム未公開）</span>
+                {% endif %}
+              </div>
               <div class="occurrence-meta">
                 <span>担当 {{ occ.instructor_name or '未確定' }}</span>
                 {% for flag in occ.diff_flags %}
@@ -145,4 +197,112 @@
   </div>
 
 </div>
+
+<script>
+// 希望席編集フォーム用のランク付けグリッド。
+// 優先: 座席レイアウト版（seat-grid--layout, SSR 済みの button.seat が並んでいる）
+// フォールバック: 連番版（JS で 1..35 の button を描画）
+// HTMX 部分更新でも動くよう、コンテンツブロック内で即時実行する。
+(function () {
+  var layoutGrid = document.getElementById('rec-edit-seat-grid-layout');
+  var seqGrid = document.getElementById('rec-edit-seat-grid');
+  var grid = layoutGrid || seqGrid;
+  var input = document.getElementById('rec-edit-seat-input');
+  var form = document.getElementById('rec-edit-seats-form');
+  if (!grid || !input || !form) return;
+
+  var capacity = parseInt(form.dataset.defaultCapacity || '35', 10);
+  var ranks = new Map();  // seat_no(int) → rank(int, 1-indexed)
+
+  // data-ranks="5,12,1" の順で初期値を復元する
+  var initialRanks = grid.dataset.ranks || '';
+  if (initialRanks) {
+    initialRanks.split(',').forEach(function (token, idx) {
+      var num = parseInt((token || '').trim(), 10);
+      if (!isNaN(num) && num > 0) ranks.set(num, idx + 1);
+    });
+  }
+
+  function syncInput() {
+    var arr = Array.from(ranks.entries())
+      .sort(function (a, b) { return a[1] - b[1]; })
+      .map(function (e) { return e[0]; });
+    input.value = arr.join(',');
+  }
+
+  function toggleRank(num) {
+    if (ranks.has(num)) {
+      var r = ranks.get(num);
+      ranks.delete(num);
+      // 以降のランクを 1 つずつ詰める
+      for (var entry of Array.from(ranks)) {
+        if (entry[1] > r) ranks.set(entry[0], entry[1] - 1);
+      }
+    } else {
+      ranks.set(num, ranks.size + 1);
+    }
+  }
+
+  function applyBadgesLayout() {
+    // SSR 済みの button.seat[data-no] に class と badge を付け直す
+    layoutGrid.querySelectorAll('button.seat').forEach(function (btn) {
+      var old = btn.querySelector('.seat-rank-badge');
+      if (old) old.remove();
+      var no = parseInt(btn.dataset.no || '0', 10);
+      if (ranks.has(no)) {
+        btn.classList.add('seat--rank');
+        var badge = document.createElement('span');
+        badge.className = 'seat-rank-badge';
+        badge.textContent = ranks.get(no);
+        btn.appendChild(badge);
+      } else {
+        btn.classList.remove('seat--rank');
+      }
+    });
+  }
+
+  function renderSeq() {
+    seqGrid.innerHTML = '';
+    for (var i = 1; i <= capacity; i++) {
+      (function (num) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seat';
+        if (ranks.has(num)) btn.classList.add('seat--rank');
+        btn.addEventListener('click', function () {
+          toggleRank(num);
+          renderSeq();
+          syncInput();
+        });
+        if (ranks.has(num)) {
+          var badge = document.createElement('span');
+          badge.className = 'seat-rank-badge';
+          badge.textContent = ranks.get(num);
+          btn.appendChild(badge);
+        }
+        btn.appendChild(document.createTextNode(('0' + num).slice(-2)));
+        seqGrid.appendChild(btn);
+      })(i);
+    }
+  }
+
+  if (layoutGrid) {
+    // レイアウト版：既に描画済みの button に click ハンドラだけ付ける
+    layoutGrid.querySelectorAll('button.seat').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var no = parseInt(btn.dataset.no || '0', 10);
+        if (!no) return;
+        toggleRank(no);
+        applyBadgesLayout();
+        syncInput();
+      });
+    });
+    applyBadgesLayout();
+    syncInput();
+  } else {
+    renderSeq();
+    syncInput();
+  }
+})();
+</script>
 {% endblock %}

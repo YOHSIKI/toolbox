@@ -62,7 +62,6 @@ def build_context(settings: Settings) -> AppContext:
 
     install_log_filter()
     notifier = DiscordNotifier(settings.discord_webhook_url)
-    dashboard = DashboardQueryService(settings.db_file, settings)
 
     device_id = load_or_create_device_id(settings.device_id_file)
     register_secret_values(device_id)
@@ -102,6 +101,7 @@ def build_context(settings: Settings) -> AppContext:
                 auth=auth,
                 dry_run=settings.dry_run,
                 public_client=public_client,
+                db_path=settings.db_file,
             )
             calendar_service = CalendarQueryService(
                 settings.db_file, gateway, settings=settings
@@ -115,6 +115,10 @@ def build_context(settings: Settings) -> AppContext:
         logger.warning(
             "running without secrets: hacomono API is not reachable; UI only mode"
         )
+
+    dashboard = DashboardQueryService(
+        settings.db_file, settings, recurring_service=recurring
+    )
 
     return AppContext(
         settings=settings,

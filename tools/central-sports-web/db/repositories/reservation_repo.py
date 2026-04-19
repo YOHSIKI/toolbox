@@ -142,8 +142,14 @@ def update_seat(db_path: Path, reservation_id: str, seat_no: int) -> None:
 
 def mark_missing_as_cancelled(
     db_path: Path, active_external_ids: list[int]
-) -> int:
-    """hacomono 側に存在しない予約をローカルでキャンセル扱いに更新。"""
+) -> list[int]:
+    """hacomono 側に存在しない予約をローカルでキャンセル扱いに更新。
+
+    今回の呼び出しで実際に cancelled に更新した external_id のリストを返す。
+    呼び出し側はこのリストを使って history に reservation.cancel を記録でき、
+    「build 前に cancelled 化済み → 次回の sync で検出できず history 欠落」
+    という取りこぼしを防げる。
+    """
 
     with write_transaction(db_path) as con:
         if active_external_ids:
@@ -156,6 +162,7 @@ def mark_missing_as_cancelled(
                  WHERE status = ?
                    AND external_id IS NOT NULL
                    AND external_id NOT IN ({placeholders})
+                RETURNING external_id
                 """,
                 (ReservationStatus.CANCELLED.value, ReservationStatus.CONFIRMED.value, *active_external_ids),
             )
@@ -167,7 +174,8 @@ def mark_missing_as_cancelled(
                        updated_at = datetime('now')
                  WHERE status = ?
                    AND external_id IS NOT NULL
+                RETURNING external_id
                 """,
                 (ReservationStatus.CANCELLED.value, ReservationStatus.CONFIRMED.value),
             )
-        return cur.rowcount
+        return [row["external_id"] for row in cur.fetchall()]

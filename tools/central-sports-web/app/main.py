@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_basic_auth
 from app.lifespan import lifespan
-from app.routes import dashboard, health, intents, recurring, reserve, studios, sync
+from app.routes import dashboard, debug, health, intents, recurring, reserve, studios, sync
 from config.settings import Settings, get_settings
 
 logging.basicConfig(
@@ -67,6 +67,11 @@ def create_app() -> FastAPI:
         intents.router,
         dependencies=[Depends(require_basic_auth)],
         tags=["intents"],
+    )
+    app.include_router(
+        debug.router,
+        dependencies=[Depends(require_basic_auth)],
+        tags=["debug"],
     )
 
     @app.get("/meta")

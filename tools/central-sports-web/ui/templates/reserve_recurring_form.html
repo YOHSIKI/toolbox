@@ -1,10 +1,12 @@
-{% extends "base.html" %}
+{% extends hx_request|default(false) and "base_empty.html" or "base.html" %}
 {% block title %}定期予約の追加 — central-sports-web{% endblock %}
 
 {% block content %}
 <div class="tabs">
-  <a class="tab" href="{{ url_for('reserve_calendar') }}">単発予約</a>
-  <a class="tab is-active" href="{{ url_for('recurring_list') }}">定期予約</a>
+  <a class="tab" href="{{ url_for('reserve_calendar') }}"
+     hx-get="{{ url_for('reserve_calendar') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">単発予約</a>
+  <a class="tab is-active" href="{{ url_for('recurring_list') }}"
+     hx-get="{{ url_for('recurring_list') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">定期予約</a>
 </div>
 
 {% if error %}
@@ -21,6 +23,7 @@
   <div class="card-body">
     <form method="post" action="{{ url_for('recurring_create') }}" class="recurring-form" id="recurring-form"
           data-programs='{{ weekday_time_programs_json|safe }}'
+          data-seat-layouts='{{ seat_layouts_json|default("{}")|safe }}'
           data-default-capacity="{{ default_capacity }}">
 
       <div class="recurring-form-row">
@@ -28,7 +31,7 @@
           <label class="field-label">曜日</label>
           <select name="day_of_week" id="rcf-day" class="select">
             {% for value, label in weekdays %}
-              <option value="{{ value }}" {% if value == 1 %}selected{% endif %}>{{ label }}</option>
+              <option value="{{ value }}" {% if value == 0 %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -49,7 +52,7 @@
         <label class="field-label">希望席（クリックで優先順位を付ける、もう一度クリックで解除）</label>
         <div class="seat-grid" id="rcf-seats"></div>
         <input type="hidden" name="seat_preferences" id="rcf-seat-input">
-        <div class="muted" style="font-size:11px;">9:00 の予約で第 1 希望から順に試み、取れたらそこで止まります。</div>
+        <div class="muted" style="font-size:11px;">9:00 の予約で第 1 希望から順に試み、取れたらそこで止まります。未設定の場合は空席を自動で選択します。</div>
       </div>
 
       <div class="stack stack-xs" style="margin-top:18px;">
@@ -83,6 +86,7 @@
 (function () {
   const form = document.getElementById('recurring-form');
   const programsData = JSON.parse(form.dataset.programs || '{}');
+  const seatLayouts = JSON.parse(form.dataset.seatLayouts || '{}');
   const defaultCapacity = parseInt(form.dataset.defaultCapacity || '35', 10);
 
   const daySel = document.getElementById('rcf-day');
@@ -138,6 +142,8 @@
       });
       programName.value = programSel.options[0].dataset.name || '';
     }
+    // プログラム候補が切り替わったら座席レイアウトも再同期
+    syncLayout();
   }
 
   function syncProgramName() {
@@ -147,39 +153,104 @@
 
   // 座席グリッド
   const ranks = new Map();  // seat_no -> rank(1..N)
+  let currentLayout = null;  // 現在描画中のレイアウト（null なら連番モード）
+
+  function currentLayoutKey() {
+    const wd = daySel.value;
+    const t = timeSel.value;
+    const pid = programSel.value;
+    if (!wd || !t || !pid) return null;
+    return wd + ':' + t + ':' + pid;
+  }
+
+  function syncLayout() {
+    const key = currentLayoutKey();
+    const layout = (key && seatLayouts[key]) || null;
+    // レイアウトが変わるときは ranks をリセット（内部番号体系が変わるため
+    // そのまま引き継ぐと別の席になってしまう）
+    if (layout !== currentLayout) {
+      ranks.clear();
+    }
+    currentLayout = layout;
+    renderSeats();
+    syncSeatInput();
+  }
+
   function renderSeats() {
     seatGrid.innerHTML = '';
-    for (let i = 1; i <= defaultCapacity; i++) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'seat';
-      btn.dataset.no = i;
-      const rank = ranks.get(i);
-      if (rank) {
-        btn.classList.add('seat--rank');
-        const badge = document.createElement('span');
-        badge.className = 'seat-rank-badge';
-        badge.textContent = rank;
-        btn.appendChild(badge);
-      }
-      btn.appendChild(document.createTextNode(('0' + i).slice(-2)));
-      btn.addEventListener('click', function () {
-        if (ranks.has(i)) {
-          const r = ranks.get(i);
-          ranks.delete(i);
-          // 以降のランクを詰める
-          for (const [no, rk] of Array.from(ranks)) {
-            if (rk > r) ranks.set(no, rk - 1);
-          }
-        } else {
-          ranks.set(i, ranks.size + 1);
+    if (currentLayout) {
+      // レイアウトあり: 飛び飛び配置で SSR 相当の見た目を再現
+      seatGrid.classList.add('seat-grid--layout');
+      seatGrid.style.gridTemplateColumns =
+        'repeat(' + (currentLayout.cols || 7) + ', minmax(36px, 1fr))';
+      seatGrid.style.gridTemplateRows =
+        'repeat(' + (currentLayout.rows || 5) + ', 36px)';
+      currentLayout.positions.forEach(function (pos) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seat';
+        btn.dataset.no = pos.no;
+        btn.style.gridColumn = String(pos.x + 1);
+        btn.style.gridRow = String(pos.y + 1);
+        const rank = ranks.get(pos.no);
+        if (rank) {
+          btn.classList.add('seat--rank');
+          const badge = document.createElement('span');
+          badge.className = 'seat-rank-badge';
+          badge.textContent = rank;
+          btn.appendChild(badge);
         }
-        renderSeats();
-        syncSeatInput();
+        btn.appendChild(document.createTextNode(pos.label));
+        btn.addEventListener('click', function () {
+          toggleRank(pos.no);
+          renderSeats();
+          syncSeatInput();
+        });
+        seatGrid.appendChild(btn);
       });
-      seatGrid.appendChild(btn);
+    } else {
+      // 連番モード（フォールバック）
+      seatGrid.classList.remove('seat-grid--layout');
+      seatGrid.style.gridTemplateColumns = '';
+      seatGrid.style.gridTemplateRows = '';
+      for (let i = 1; i <= defaultCapacity; i++) {
+        const num = i;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seat';
+        btn.dataset.no = num;
+        const rank = ranks.get(num);
+        if (rank) {
+          btn.classList.add('seat--rank');
+          const badge = document.createElement('span');
+          badge.className = 'seat-rank-badge';
+          badge.textContent = rank;
+          btn.appendChild(badge);
+        }
+        btn.appendChild(document.createTextNode(('0' + num).slice(-2)));
+        btn.addEventListener('click', function () {
+          toggleRank(num);
+          renderSeats();
+          syncSeatInput();
+        });
+        seatGrid.appendChild(btn);
+      }
     }
   }
+
+  function toggleRank(num) {
+    if (ranks.has(num)) {
+      const r = ranks.get(num);
+      ranks.delete(num);
+      // 以降のランクを詰める
+      for (const [no, rk] of Array.from(ranks)) {
+        if (rk > r) ranks.set(no, rk - 1);
+      }
+    } else {
+      ranks.set(num, ranks.size + 1);
+    }
+  }
+
   function syncSeatInput() {
     // ranks を rank 昇順で [no, no, ...] に
     const arr = Array.from(ranks.entries())
@@ -190,11 +261,13 @@
 
   daySel.addEventListener('change', rebuildTimes);
   timeSel.addEventListener('change', rebuildPrograms);
-  programSel.addEventListener('change', syncProgramName);
+  programSel.addEventListener('change', function () {
+    syncProgramName();
+    syncLayout();
+  });
 
   rebuildTimes();
-  renderSeats();
-  syncSeatInput();
+  // rebuildTimes → rebuildPrograms → syncLayout → renderSeats の流れで初期化される
 })();
 </script>
 {% endblock %}

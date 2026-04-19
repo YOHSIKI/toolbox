@@ -11,36 +11,16 @@ from fastapi.templating import Jinja2Templates
 
 from app.deps import AppContext, get_context
 from app.domain.entities import DAY_OF_WEEK_LABEL, RecurringStatus
-from app.routes._shared import resolve_current_studio
+from app.domain.errors import NotFound
+from app.routes._shared import parse_seat_preferences, resolve_current_studio
 from app.services.dashboard_query import run_schedule_label
+from app.templating import render_page
 
 router = APIRouter()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
 templates.env.globals["run_schedule_label"] = run_schedule_label
-
-
-def _parse_seat_preferences(raw: str) -> list[int]:
-    raw = (raw or "").replace("、", ",")
-    seats: list[int] = []
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        try:
-            seats.append(int(token))
-        except ValueError:
-            continue
-    # 重複を順序を保って除去
-    seen: set[int] = set()
-    deduped: list[int] = []
-    for s in seats:
-        if s in seen:
-            continue
-        seen.add(s)
-        deduped.append(s)
-    return deduped
 
 
 def _label_for_offset(delta_weeks: int) -> str:
@@ -66,6 +46,7 @@ def recurring_list(
     items = recurring_repo.list_recurring(context.db_path)
     current = None
     occurrences: list = []
+    seat_maps: dict[str, object] = {}
     if context.recurring is None:
         error = "認証情報が未設定のため、定期予約の実行が停止しています。"
     else:
@@ -79,8 +60,19 @@ def recurring_list(
             for occ in raw:
                 delta_weeks = (occ.lesson_date - today).days // 7
                 occurrences.append((occ, _label_for_offset(delta_weeks)))
+        # 希望席編集フォーム用に、各定期予約の座席レイアウトを解決する。
+        # gateway の学習索引（program_name/曜日/時刻 → space_id）から引くため、
+        # 未学習や別店舗の定期予約は None になる（テンプレート側で連番フォールバック）。
+        for item in items:
+            try:
+                smap = context.recurring.resolve_seat_map_for_item(item)
+            except Exception:  # noqa: BLE001 - UI を落とさない
+                smap = None
+            if smap is not None:
+                seat_maps[item.id] = smap
 
-    return templates.TemplateResponse(
+    return render_page(
+        templates,
         request,
         "reserve_recurring.html",
         {
@@ -92,6 +84,7 @@ def recurring_list(
             "items": items,
             "current": current,
             "occurrences": occurrences,
+            "seat_maps": seat_maps,
             "today": today,
             "error": error,
             "context": context,
@@ -158,7 +151,42 @@ def recurring_new(
         ensure_ascii=False,
     )
 
-    return templates.TemplateResponse(
+    # 各 (wd, time, program) について gateway の学習済み hint から座席レイアウトを
+    # 逆引きしておく。ヒットしなかった組み合わせは JS 側で 1〜35 連番にフォールバック。
+    seat_layouts: dict[str, dict] = {}
+    if studio is not None and context.recurring is not None:
+        for wd, times_map in weekday_time_programs.items():
+            for time_str, programs_list in times_map.items():
+                for pid, pname, _cap in programs_list:
+                    try:
+                        smap = context.recurring.resolve_seat_map_for_slot(
+                            studio_id=studio.studio_id,
+                            studio_room_id=studio.studio_room_id,
+                            program_name=pname,
+                            day_of_week=wd,
+                            start_time=time_str,
+                        )
+                    except Exception:  # noqa: BLE001 - UI を落とさない
+                        smap = None
+                    if smap is None or not smap.positions:
+                        continue
+                    seat_layouts[f"{wd}:{time_str}:{pid}"] = {
+                        "cols": smap.grid_cols,
+                        "rows": smap.grid_rows,
+                        "positions": [
+                            {
+                                "no": p.no,
+                                "label": p.no_label,
+                                "x": p.coord_x,
+                                "y": p.coord_y,
+                            }
+                            for p in smap.positions
+                        ],
+                    }
+    seat_layouts_json = _json.dumps(seat_layouts, ensure_ascii=False)
+
+    return render_page(
+        templates,
         request,
         "reserve_recurring_form.html",
         {
@@ -169,6 +197,7 @@ def recurring_new(
             "studio": studio,
             "weekdays": weekdays,
             "weekday_time_programs_json": weekday_time_programs_json,
+            "seat_layouts_json": seat_layouts_json,
             "default_capacity": default_capacity,
             "error": error,
             "context": context,
@@ -192,7 +221,7 @@ def recurring_create(
     studio = resolve_current_studio(request, context.db_path)
     if studio is None:
         raise HTTPException(500, "店舗が登録されていません")
-    seats = _parse_seat_preferences(seat_preferences)
+    seats = parse_seat_preferences(seat_preferences)
     item = context.recurring.create(
         day_of_week=int(day_of_week),
         start_time=start_time,
@@ -205,6 +234,31 @@ def recurring_create(
     )
     return RedirectResponse(
         url=f"/reserve/recurring?selected={item.id}", status_code=303
+    )
+
+
+@router.post(
+    "/reserve/recurring/{recurring_id}/update-seats",
+    name="recurring_update_seats",
+)
+def recurring_update_seats(
+    recurring_id: str,
+    seat_preferences: str = Form(""),
+    return_to: str = Form("/reserve/recurring"),
+    context: AppContext = Depends(get_context),
+) -> RedirectResponse:
+    if context.recurring is None:
+        raise HTTPException(503, "認証情報が未設定のため操作できません")
+    seats = parse_seat_preferences(seat_preferences)
+    try:
+        context.recurring.update_seats(recurring_id, seats)
+    except NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return RedirectResponse(
+        url=f"{return_to}?selected={recurring_id}"
+        if "?" not in return_to
+        else f"{return_to}&selected={recurring_id}",
+        status_code=303,
     )
 
 

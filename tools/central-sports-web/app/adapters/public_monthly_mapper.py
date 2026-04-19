@@ -9,10 +9,61 @@
 from __future__ import annotations
 
 import calendar as _calendar
+import re as _re
+import unicodedata as _unicodedata
 from datetime import date
 
 from app.domain.entities import Lesson, LessonState
 from infra.hacomono.public_monthly import PublicMonthlyPayload
+
+
+_WHITESPACE_RE = _re.compile(r"\s+")
+
+# 公開月間 API のインストラクター名を reserve API と同じ表記に寄せるためのエイリアス。
+# reserve API 側が「CS Live」で統一しているのに対し、公開月間は「インストラクター映像」
+# という汎用名で返してくる。他に同種の表記揺れが見つかれば追記する。
+_INSTRUCTOR_ALIASES: dict[str, str] = {
+    "インストラクター映像": "CS Live",
+}
+
+
+def _normalize_display_text(text: str | None) -> str | None:
+    """公開月間 API の半角カナ・全角英字等を読みやすい表記に揃える。
+
+    reserve API 側は全角カナ・半角英字・半角スペースが基本だが、公開月間 API
+    は半角カナ（`ｼｪｲﾌﾟﾊﾟﾝﾌﾟ`）や全角英字（`ＺｅｎＹｏｇａ`）、前後の空白が
+    混ざる。両者を見比べたときに違和感が出るのを避けるため、NFKC で文字種
+    を揃え、連続空白を 1 つに圧縮する。
+    """
+
+    if text is None:
+        return None
+    s = str(text)
+    if not s:
+        return s
+    s = _unicodedata.normalize("NFKC", s)
+    s = _WHITESPACE_RE.sub(" ", s).strip()
+    return s
+
+
+def _normalize_instructor_name(name: str | None) -> str | None:
+    """インストラクター名を reserve API 側の表記に揃える。
+
+    - `"インストラクター映像"` → `"CS Live"`（公式が CS Live 講師を汎用名で返す）
+    - `"市川 弘美"` → `"市川"`（reserve API は苗字のみで返すため、フルネームを苗字に圧縮）
+    - `"CS Live"` などそのまま reserve と一致するものはそのまま
+    """
+
+    base = _normalize_display_text(name)
+    if base is None or not base:
+        return None
+    # 静的エイリアス（全体一致）
+    if base in _INSTRUCTOR_ALIASES:
+        return _INSTRUCTOR_ALIASES[base]
+    # 苗字抽出: 空白区切りの最初の要素（英語名等も「First Last」なら First になるが
+    # 現状の hacomono 観測範囲では日本人名が中心なのでこれで十分）
+    parts = _WHITESPACE_RE.split(base)
+    return parts[0] if parts else base
 
 
 def _youbi_of_date(d: date) -> str:
@@ -60,6 +111,46 @@ def _month_iter(year: int, month: int):
         yield date(year, month, day)
 
 
+def collect_closed_dates(
+    payload: PublicMonthlyPayload,
+    *,
+    year: int,
+    month: int,
+) -> set[date]:
+    """公開月間 API のレスポンスから、指定月の「通常営業でない日」を返す。
+
+    `pims_closed` の `datekb` 仕様（観測＋公式 PDF 突き合わせ）:
+      - "0" = 通常営業日
+      - "1" = 定休日（府中店の場合、金曜日）
+      - "3" = GW/祝日などで**通常プログラムと時間が異なる日**。公式 PDF に
+        「営業時間とは異なりますので、直接クラブへお問い合わせください」と
+        注記されており、予約 UI 側では通常のテンプレートレッスンを出すと
+        誤解を招くため休館日と同じ扱いにする（= 該当日を非表示）。
+
+    よって、datekb が "0" 以外は全て「休館扱い」として closed_dates に含める。
+    UI 側のバッジは「休館」で統一（datekb=3 でも詳細はクラブに直接問い合わせる
+    前提なので、このアプリで個別の文言を出し分ける価値は薄い）。
+    """
+
+    closed_dates: set[date] = set()
+    for entry in payload.closed_days:
+        day_raw = entry.get("datebi")
+        try:
+            day = int(day_raw) if day_raw is not None else None
+        except (TypeError, ValueError):
+            day = None
+        if day is None:
+            continue
+        datekb = str(entry.get("datekb") or "0")
+        if datekb == "0":
+            continue
+        try:
+            closed_dates.add(date(year, month, day))
+        except ValueError:
+            continue
+    return closed_dates
+
+
 def map_public_monthly(
     payload: PublicMonthlyPayload,
     *,
@@ -76,22 +167,7 @@ def map_public_monthly(
     """
 
     # 休館日集合（pims_closed は全日メタで、datekb != '0' が休館扱い）
-    closed_dates: set[date] = set()
-    for entry in payload.closed_days:
-        day_raw = entry.get("datebi")
-        try:
-            day = int(day_raw) if day_raw is not None else None
-        except (TypeError, ValueError):
-            day = None
-        if day is None:
-            continue
-        datekb = str(entry.get("datekb") or "0")
-        if datekb == "0":
-            continue  # 営業日
-        try:
-            closed_dates.add(date(year, month, day))
-        except ValueError:
-            continue
+    closed_dates = collect_closed_dates(payload, year=year, month=month)
 
     # 曜日 → 指定施設のレッスン候補
     by_youbi: dict[str, list[dict]] = {}
@@ -127,10 +203,14 @@ def map_public_monthly(
                 continue
             end_time = _end_hhmm(start_time, row.get("totime"))
             program_id = str(row.get("progcd") or "")
-            program_name = program_name_raw or program_id or "レッスン"
-            instructor_name = row.get("insnm") or row.get("instnm")
-            if isinstance(instructor_name, str):
-                instructor_name = instructor_name.strip() or None
+            # 半角カナ・全角英字等を NFKC で揃えて表記揺れを吸収
+            program_name_display = _normalize_display_text(program_name_raw)
+            program_name = program_name_display or program_id or "レッスン"
+            instructor_name_raw = row.get("insnm") or row.get("instnm")
+            if isinstance(instructor_name_raw, str):
+                # reserve API 側と揃える: フルネーム → 苗字のみ、
+                # 「インストラクター映像」→「CS Live」等のエイリアス適用
+                instructor_name = _normalize_instructor_name(instructor_name_raw)
             else:
                 instructor_name = None
             lesson = Lesson(
@@ -154,6 +234,10 @@ def map_public_monthly(
                 # 未開放週は「空きあり」相当の見た目でカレンダーに描画し、パネル側で
                 # 予約予定フォームに切り替える。is_reservable=False だけは維持
                 state=LessonState.AVAILABLE,
+                # 公開月間 API 由来の progcd を保存。merge で program_id が reserve
+                # の数値 ID に上書きされても source_progcd は残り、alias 学習・
+                # lookup のキーになる
+                source_progcd=program_id or None,
             )
             lessons.append(lesson)
 

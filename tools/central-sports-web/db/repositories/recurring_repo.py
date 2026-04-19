@@ -127,3 +127,20 @@ def update_status(
             "UPDATE recurring_reservations SET status = ?, updated_at = datetime('now') WHERE id = ?",
             (status.value, recurring_id),
         )
+
+
+def update_seat_preferences(
+    db_path: Path, recurring_id: str, seats: list[int]
+) -> None:
+    """希望席の優先順位だけを差し替える（status / 曜日 / 時刻 / program_id は触らない）。"""
+
+    with write_transaction(db_path) as con:
+        con.execute(
+            """
+            UPDATE recurring_reservations
+               SET seat_preferences = ?,
+                   updated_at = datetime('now')
+             WHERE id = ?
+            """,
+            (json.dumps(seats, ensure_ascii=False), recurring_id),
+        )

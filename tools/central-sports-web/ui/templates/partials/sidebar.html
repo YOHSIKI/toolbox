@@ -9,7 +9,8 @@
     <div class="nav-section-title">メイン</div>
     <ul class="nav-list">
       <li>
-        <a class="nav-item {% if active_nav == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}">
+        <a class="nav-item {% if active_nav == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}"
+           hx-get="{{ url_for('dashboard') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/>
             <rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>
@@ -18,7 +19,8 @@
         </a>
       </li>
       <li>
-        <a class="nav-item {% if active_nav == 'reserve' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}">
+        <a class="nav-item {% if active_nav == 'reserve' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}"
+           hx-get="{{ url_for('reserve_calendar') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2"/>
             <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
@@ -43,3 +45,21 @@
     </div>
   </div>
 </aside>
+<script>
+// HTMX 部分更新でサイドバーは差し替わらないため、URL 変化に応じて
+// 現在開いているページに対応する nav-item に is-active を再付与する。
+(function() {
+  function updateActiveNav() {
+    var path = window.location.pathname;
+    document.querySelectorAll('.nav .nav-item').forEach(function(a) {
+      try {
+        var linkPath = new URL(a.href).pathname;
+        var isActive = (linkPath === '/') ? (path === '/') : (path === linkPath || path.indexOf(linkPath + '/') === 0);
+        a.classList.toggle('is-active', isActive);
+      } catch (e) { /* invalid href: skip */ }
+    });
+  }
+  document.body.addEventListener('htmx:pushedIntoHistory', updateActiveNav);
+  window.addEventListener('popstate', updateActiveNav);
+})();
+</script>

@@ -24,6 +24,7 @@ from app.domain.entities import (
     ReservationAttempt,
     ReservationOrigin,
     ReservationStatus,
+    SeatPosition,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,14 +155,23 @@ def map_weekly_schedule(
         capacity = _coerce_int(space_entry.get("space_num")) or _coerce_int(item.get("capacity"))
         layout_name = space_entry.get("name") if space_entry else None
 
-        remaining = _coerce_int(item.get("remain_reservation"))
+        # hacomono の item には `remain_reservation` フィールドは無い。
+        # 満席判定は capacity − reservation_count（通常） − reservation_trial_count（体験）で算出する。
+        reservation_count = _coerce_int(item.get("reservation_count")) or 0
+        trial_count = _coerce_int(item.get("reservation_trial_count")) or 0
+        reserved_total = reservation_count + trial_count
+        remaining: int | None
+        if capacity is not None:
+            remaining = max(0, capacity - reserved_total)
+        else:
+            remaining = _coerce_int(item.get("remain_reservation"))
         is_reservable = bool(item.get("is_reservable"))
 
         state = LessonState.AVAILABLE
-        if not is_reservable:
-            state = LessonState.UNRESERVABLE
         if remaining is not None and remaining <= 0:
             state = LessonState.FULL
+        elif not is_reservable:
+            state = LessonState.UNRESERVABLE
 
         lesson = Lesson(
             studio_lesson_id=_coerce_int(item.get("id")) or 0,
@@ -187,6 +197,58 @@ def map_weekly_schedule(
 
     lessons.sort(key=lambda lsn: (lsn.lesson_date, lsn.start_time))
     return lessons
+
+
+# ---------------------------------------------------------------
+# studio_room_space の space_details（座席配置）
+# ---------------------------------------------------------------
+def map_space_details(space_entry: dict) -> list[SeatPosition]:
+    """`studio_room_spaces[i].space_details` を `SeatPosition` のリストに変換する。
+
+    各 detail には `no`（予約 API に送る内部連番）、`no_label`（UI 表示）、
+    `coord_x` / `coord_y`（グリッド座標）が入っている。数値化できない要素は skip。
+    """
+
+    if not isinstance(space_entry, dict):
+        return []
+    details = space_entry.get("space_details") or []
+    positions: list[SeatPosition] = []
+    for d in details:
+        if not isinstance(d, dict):
+            continue
+        no = _coerce_int(d.get("no"))
+        cx = _coerce_int(d.get("coord_x"))
+        cy = _coerce_int(d.get("coord_y"))
+        if no is None or cx is None or cy is None:
+            continue
+        label_raw = d.get("no_label")
+        label = str(label_raw) if label_raw is not None else str(no)
+        positions.append(
+            SeatPosition(no=no, no_label=label, coord_x=cx, coord_y=cy)
+        )
+    positions.sort(key=lambda p: p.no)
+    return positions
+
+
+def build_space_index(payload: dict) -> dict[int, list[SeatPosition]]:
+    """schedule API の payload から `studio_room_space_id → positions` 辞書を作る。"""
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return {}
+    studio_lessons = data.get("studio_lessons")
+    if not isinstance(studio_lessons, dict):
+        return {}
+    spaces = studio_lessons.get("studio_room_spaces") or []
+    index: dict[int, list[SeatPosition]] = {}
+    for entry in spaces:
+        if not isinstance(entry, dict):
+            continue
+        space_id = _coerce_int(entry.get("id"))
+        if space_id is None:
+            continue
+        index[space_id] = map_space_details(entry)
+    return index
 
 
 # ---------------------------------------------------------------
@@ -220,8 +282,17 @@ def map_my_reservations(payload: dict) -> list[Reservation]:
         program_id_raw = item.get("program_id")
         program_id = str(program_id_raw) if program_id_raw is not None else ""
         program_name = str(program.get("name") or item.get("program_name") or program_id or "レッスン")
+        # 予約一覧 API は instructor（単数辞書）ではなく instructors（配列）で返す。
+        # 先頭の instructor を代表として採用（ほぼ常に 1 人）。
         instructor = None
-        if isinstance(item.get("instructor"), dict):
+        instructor_list = item.get("instructors")
+        if isinstance(instructor_list, list):
+            for entry in instructor_list:
+                if isinstance(entry, dict):
+                    instructor = entry.get("nick_name") or entry.get("name")
+                    if instructor:
+                        break
+        if instructor is None and isinstance(item.get("instructor"), dict):
             instructor = item["instructor"].get("nick_name") or item["instructor"].get("name")
 
         studio_id = _coerce_int(item.get("studio_id") or studio_obj.get("id")) or 0

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 
 INITIAL_SCHEMA = [
@@ -183,6 +183,97 @@ V3_SETUP: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_intents_run_at ON booking_intents (scheduled_run_at, status)",
     "CREATE INDEX IF NOT EXISTS idx_intents_date ON booking_intents (lesson_date, status)",
+]
+
+
+# ------------------------------------------------------------------
+# V4: 座席レイアウトの永続化
+# ------------------------------------------------------------------
+# - space_details_cache: studio_room_space_id → 座席配置マスタ
+#   （予約 API で観測した positions を JSON で保存。プロセス再起動後も復元可能）
+# - space_layout_hints: (店舗, プログラム名, 曜日, 時刻) → 使用 space_id の学習 hint
+#   （予約 API で観測したレッスンから蓄積、未開放週の lesson 補完に使う）
+V4_SETUP: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS space_details_cache (
+        studio_room_space_id INTEGER PRIMARY KEY,
+        name TEXT,
+        space_num INTEGER,
+        grid_cols INTEGER NOT NULL DEFAULT 0,
+        grid_rows INTEGER NOT NULL DEFAULT 0,
+        positions_json TEXT NOT NULL,
+        observed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS space_layout_hints (
+        studio_id INTEGER NOT NULL,
+        studio_room_id INTEGER NOT NULL,
+        program_name_norm TEXT NOT NULL,
+        day_of_week INTEGER NOT NULL,
+        start_time TEXT NOT NULL,
+        studio_room_space_id INTEGER NOT NULL,
+        program_name_raw TEXT,
+        observed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (studio_id, studio_room_id, program_name_norm, day_of_week, start_time)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_layout_hints_name ON space_layout_hints (studio_id, studio_room_id, program_name_norm)",
+    "CREATE INDEX IF NOT EXISTS idx_layout_hints_time ON space_layout_hints (studio_id, studio_room_id, day_of_week, start_time)",
+]
+
+
+# ------------------------------------------------------------------
+# V5: reserve API で観測したレッスンの永続化
+# ------------------------------------------------------------------
+# - observed_lessons: (店舗, 部屋, 日付, 時刻, program_id) → 観測したプログラム名・
+#   インストラクター名・studio_room_space_id。reserve API は「真の表示名」を返す
+#   ので、これを蓄積し、後に公開月間 API 経由で組み立てる lesson に対して
+#   program_name / instructor_name / studio_room_space_id を上書きする元にする。
+V5_SETUP: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS observed_lessons (
+        studio_id INTEGER NOT NULL,
+        studio_room_id INTEGER NOT NULL,
+        lesson_date TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        program_id TEXT NOT NULL,
+        program_name TEXT,
+        instructor_id INTEGER,
+        instructor_name TEXT,
+        studio_room_space_id INTEGER,
+        capacity INTEGER,
+        observed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (studio_id, studio_room_id, lesson_date, start_time, program_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_observed_lessons_date ON observed_lessons (studio_id, studio_room_id, lesson_date)",
+    "CREATE INDEX IF NOT EXISTS idx_observed_lessons_name ON observed_lessons (studio_id, studio_room_id, program_name)",
+]
+
+
+# ------------------------------------------------------------------
+# V6: 公開月間 API の progcd → reserve API の program_name/program_id の
+# エイリアス学習テーブル
+# ------------------------------------------------------------------
+# 公開月間 API と reserve API の両方で観測できた枠について、
+# `progcd` (hacomono 内部 ID; 例 "A0450" = ZUMBA(R), "AA756" = CSLive 系) を
+# キーに reserve API 側の正しい表記を保存する。
+# これにより、reserve API 窓の外にある未開放週の lesson でも、progcd が同じ
+# であれば同じ正規表記で表示できる。progcd 単位なので誤置換の懸念は無い。
+V6_SETUP: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS program_aliases (
+        studio_id INTEGER NOT NULL,
+        studio_room_id INTEGER NOT NULL,
+        progcd TEXT NOT NULL,
+        program_id TEXT,
+        program_name TEXT NOT NULL,
+        observed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (studio_id, studio_room_id, progcd)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_program_aliases_pid ON program_aliases (studio_id, studio_room_id, program_id)",
 ]
 
 
