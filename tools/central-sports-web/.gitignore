@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/device_id.txt
+secrets/
+.pytest_cache/
+.ruff_cache/

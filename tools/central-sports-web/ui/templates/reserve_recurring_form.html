@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}定期予約の追加 — central-sports-web{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <a class="tab" href="{{ url_for('reserve_calendar') }}">単発予約</a>
+  <a class="tab is-active" href="{{ url_for('recurring_list') }}">定期予約</a>
+</div>
+
+{% if error %}
+<div class="card" style="border-left:3px solid var(--warning); padding:12px 18px; margin-bottom:16px; background:var(--warning-soft);">
+  <span class="muted">{{ error }}</span>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">
+    <h2>定期予約を追加</h2>
+    <a class="btn btn--ghost" href="{{ url_for('recurring_list') }}">← 一覧に戻る</a>
+  </div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('recurring_create') }}" class="recurring-form" id="recurring-form"
+          data-programs='{{ weekday_time_programs_json|safe }}'
+          data-default-capacity="{{ default_capacity }}">
+
+      <div class="recurring-form-row">
+        <div class="stack stack-xs">
+          <label class="field-label">曜日</label>
+          <select name="day_of_week" id="rcf-day" class="select">
+            {% for value, label in weekdays %}
+              <option value="{{ value }}" {% if value == 1 %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="stack stack-xs">
+          <label class="field-label">時刻</label>
+          <select name="start_time" id="rcf-time" class="select" required></select>
+        </div>
+
+        <div class="stack stack-xs" style="flex:1;">
+          <label class="field-label">プログラム</label>
+          <select name="program_id" id="rcf-program" class="select" required></select>
+          <input type="hidden" name="program_name" id="rcf-program-name">
+        </div>
+      </div>
+
+      <div class="stack stack-xs" style="margin-top:18px;">
+        <label class="field-label">希望席（クリックで優先順位を付ける、もう一度クリックで解除）</label>
+        <div class="seat-grid" id="rcf-seats"></div>
+        <input type="hidden" name="seat_preferences" id="rcf-seat-input">
+        <div class="muted" style="font-size:11px;">9:00 の予約で第 1 希望から順に試み、取れたらそこで止まります。</div>
+      </div>
+
+      <div class="stack stack-xs" style="margin-top:18px;">
+        <label class="field-label">メモ（任意）</label>
+        <input type="text" name="note" placeholder="例: 月曜の朝イチは体力がある日"
+               style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);">
+      </div>
+
+      <div class="row row-gap-sm" style="justify-content:flex-end; margin-top:24px;">
+        <a class="btn" href="{{ url_for('recurring_list') }}">キャンセル</a>
+        <button class="btn btn--primary" type="submit">定期予約を登録</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.recurring-form-row {
+  display: grid;
+  grid-template-columns: 120px 140px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.recurring-form .select { width: 100%; }
+#rcf-seats {
+  max-width: 520px;
+}
+</style>
+
+<script>
+(function () {
+  const form = document.getElementById('recurring-form');
+  const programsData = JSON.parse(form.dataset.programs || '{}');
+  const defaultCapacity = parseInt(form.dataset.defaultCapacity || '35', 10);
+
+  const daySel = document.getElementById('rcf-day');
+  const timeSel = document.getElementById('rcf-time');
+  const programSel = document.getElementById('rcf-program');
+  const programName = document.getElementById('rcf-program-name');
+  const seatGrid = document.getElementById('rcf-seats');
+  const seatInput = document.getElementById('rcf-seat-input');
+
+  function rebuildTimes() {
+    const wd = daySel.value;
+    const times = programsData[wd] || {};
+    const timeKeys = Object.keys(times).sort();
+    timeSel.innerHTML = '';
+    if (timeKeys.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '（開講なし）';
+      timeSel.appendChild(opt);
+    } else {
+      timeKeys.forEach(function (t) {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        timeSel.appendChild(opt);
+      });
+    }
+    rebuildPrograms();
+  }
+
+  function rebuildPrograms() {
+    const wd = daySel.value;
+    const t = timeSel.value;
+    const progs = ((programsData[wd] || {})[t]) || [];
+    programSel.innerHTML = '';
+    if (progs.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '（プログラムなし）';
+      programSel.appendChild(opt);
+      programName.value = '';
+    } else {
+      // 同じ pname が重複するときだけ ID で区別する
+      const nameCount = {};
+      progs.forEach(function (e) { nameCount[e[1]] = (nameCount[e[1]] || 0) + 1; });
+      progs.forEach(function (entry) {
+        const [pid, pname] = entry;
+        const opt = document.createElement('option');
+        opt.value = pid;
+        opt.textContent = nameCount[pname] > 1 ? (pname + ' #' + pid) : pname;
+        opt.dataset.name = pname;
+        programSel.appendChild(opt);
+      });
+      programName.value = programSel.options[0].dataset.name || '';
+    }
+  }
+
+  function syncProgramName() {
+    const opt = programSel.options[programSel.selectedIndex];
+    programName.value = opt ? (opt.dataset.name || '') : '';
+  }
+
+  // 座席グリッド
+  const ranks = new Map();  // seat_no -> rank(1..N)
+  function renderSeats() {
+    seatGrid.innerHTML = '';
+    for (let i = 1; i <= defaultCapacity; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'seat';
+      btn.dataset.no = i;
+      const rank = ranks.get(i);
+      if (rank) {
+        btn.classList.add('seat--rank');
+        const badge = document.createElement('span');
+        badge.className = 'seat-rank-badge';
+        badge.textContent = rank;
+        btn.appendChild(badge);
+      }
+      btn.appendChild(document.createTextNode(('0' + i).slice(-2)));
+      btn.addEventListener('click', function () {
+        if (ranks.has(i)) {
+          const r = ranks.get(i);
+          ranks.delete(i);
+          // 以降のランクを詰める
+          for (const [no, rk] of Array.from(ranks)) {
+            if (rk > r) ranks.set(no, rk - 1);
+          }
+        } else {
+          ranks.set(i, ranks.size + 1);
+        }
+        renderSeats();
+        syncSeatInput();
+      });
+      seatGrid.appendChild(btn);
+    }
+  }
+  function syncSeatInput() {
+    // ranks を rank 昇順で [no, no, ...] に
+    const arr = Array.from(ranks.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(function (entry) { return entry[0]; });
+    seatInput.value = arr.join(',');
+  }
+
+  daySel.addEventListener('change', rebuildTimes);
+  timeSel.addEventListener('change', rebuildPrograms);
+  programSel.addEventListener('change', syncProgramName);
+
+  rebuildTimes();
+  renderSeats();
+  syncSeatInput();
+})();
+</script>
+{% endblock %}

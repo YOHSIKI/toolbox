@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード — central-sports-web{% endblock %}
+{% block content_stack %}stack-lg{% endblock %}
+
+{% block content %}
+{% set summary = data.daily_summary %}
+{% set level_class = {'success':'', 'warning':'summary--warning', 'failure':'summary--danger'}[summary.overall_level.value] %}
+
+<div class="summary {{ level_class }}">
+  <div class="summary-head">
+    <div>
+      <div class="summary-eyebrow">本日 {{ today.strftime('%m/%d') }}（{{ ['月','火','水','木','金','土','日'][today.weekday()] }}）の予約結果</div>
+      <div class="summary-title">
+        {% if summary.total_count == 0 %}
+          今朝の予約実行はまだありません
+        {% elif summary.failure_count > 0 %}
+          予約できなかったレッスンがあります
+        {% elif summary.warning_count > 0 %}
+          {{ summary.total_count }} 件 予約できました（一部は代替席）
+        {% else %}
+          {{ summary.total_count }} 件 予約できました
+        {% endif %}
+      </div>
+    </div>
+    <div class="summary-headline-right">
+      {% if summary.total_count > 0 %}
+        9:00 実行 · 失敗 {{ summary.failure_count }} 件
+      {% else %}
+        次回 明朝 9:00
+      {% endif %}
+    </div>
+  </div>
+  {% if summary.items %}
+  <div class="summary-list">
+    {% for item in summary.items %}
+      {% set item_class = 'summary-item--success' if item.result.value == 'success' else ('summary-item--warning' if item.result.value == 'warning' else 'summary-item--danger') %}
+      <div class="summary-item {{ item_class }}">
+        {% if item.result.value == 'success' %}
+          <svg class="summary-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        {% elif item.result.value == 'warning' %}
+          <svg class="summary-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        {% else %}
+          <svg class="summary-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        {% endif %}
+        <div>
+          <div class="summary-item-title">{{ item.program_name }}{% if item.seat_no is not none %} · 席 {{ '%02d' | format(item.seat_no) }}{% endif %}</div>
+          <div class="summary-item-sub">{{ '%d/%d' | format(item.lesson_date.month, item.lesson_date.day) }} {{ item.lesson_time }} / {{ item.detail }}</div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="grid-2col">
+
+  <div class="card">
+    <div class="card-header">
+      <h2>現在の予約</h2>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <form method="post" action="{{ url_for('sync_now') }}" style="display:inline;">
+          <button class="btn" type="submit" title="マイページの予約をいま取り込む">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            マイページと同期
+          </button>
+        </form>
+        <span class="badge badge--neutral">{{ data.current_reservations|length }} 件</span>
+      </div>
+    </div>
+    <div class="card-body card-body-flush">
+      {% if data.current_reservations %}
+        <div class="list">
+          {% for r in data.current_reservations %}
+          <div class="list-row">
+            <div class="list-date">
+              <div class="list-date-day">{{ r.lesson_date.day }}</div>
+              <div>{{ ['月','火','水','木','金','土','日'][r.lesson_date.weekday()] }} {{ r.lesson_time }}</div>
+            </div>
+            <div>
+              <div class="list-title">{{ r.program_name }}</div>
+              <div class="list-meta">
+                {% if r.seat_no is not none %}<span>席 {{ '%02d' | format(r.seat_no) }}</span><span class="list-meta-dot">·</span>{% endif %}
+                <span>担当 {{ r.instructor_name or '未定' }}</span>
+                {% if r.origin.value == 'recurring' %}
+                  <span class="list-meta-dot">·</span>
+                  <span class="badge badge--accent" style="font-size:10px;padding:1px 6px;">定期</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="list-actions">
+              <form method="post" action="{{ url_for('reserve_cancel', reservation_id=r.id) }}"
+                    onsubmit="return confirm('{{ r.program_name }} の予約を取り消しますか？');" style="display:inline;">
+                <button class="btn btn--danger-ghost" type="submit">取消</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="card-body muted" style="text-align:center;">現在の予約はありません</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>予約予定</h2>
+      <span class="badge badge--accent">{{ data.upcoming|length }} 件</span>
+    </div>
+    <div class="card-body card-body-flush">
+      {% if data.upcoming %}
+        <div class="list">
+          {% for u in data.upcoming %}
+          <div class="list-row">
+            <div class="list-date">
+              <div class="list-date-day">{{ u.lesson_date.day }}</div>
+              <div>{{ ['月','火','水','木','金','土','日'][u.lesson_date.weekday()] }} {{ u.lesson_time }}</div>
+            </div>
+            <div>
+              <div class="list-title">{{ u.program_name }}</div>
+              <div class="list-meta">
+                <span>{{ run_schedule_label(run_at=u.scheduled_run_at, today=today) }}</span>
+                {% if u.seat_preferences %}
+                  <span class="list-meta-dot">·</span>
+                  <span>希望席</span>
+                  <div class="seat-chips">
+                    {% for seat in u.seat_preferences[:3] %}
+                      <span class="seat-chip {% if loop.first %}seat-chip--first{% endif %}">{{ '%02d' | format(seat) }}</span>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+            <div>
+              <span class="badge {% if u.scheduled_run_at.date() == today %}badge--accent{% else %}badge--neutral{% endif %}">予約待ち</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="card-body muted" style="text-align:center;">
+          予約予定はありません。<a href="{{ url_for('recurring_list') }}">定期予約</a>を登録すると表示されます。
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>予約履歴</h2>
+  </div>
+  <div class="card-body card-body-flush">
+    {% if data.history %}
+      {% for h in data.history %}
+      {% set dot_class = 'log-dot--success' if h.result.value == 'success' else ('log-dot--warning' if h.result.value == 'warning' else 'log-dot--danger') %}
+      <div class="log-row">
+        <span class="log-dot {{ dot_class }}"></span>
+        <span class="log-time mono">{{ relative_log_time(h.occurred_at, today=today) }}</span>
+        <div><span class="log-msg">{{ h.message }}</span></div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="card-body muted" style="text-align:center;">まだ履歴はありません</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

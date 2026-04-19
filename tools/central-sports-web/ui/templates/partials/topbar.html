@@ -1,0 +1,29 @@
+{% set studios = studios|default(None) %}
+{% set current_studio = current_studio|default(None) %}
+<header class="topbar">
+  <div class="topbar-title">{{ topbar_title|default('') }}</div>
+  <div class="topbar-actions">
+    {% if studios and studios|length > 1 %}
+      <form method="post" action="{{ url_for('switch_studio') }}" style="display:inline;">
+        <input type="hidden" name="next_url" value="{{ next_url|default('/') }}">
+        <select name="studio_pk" onchange="this.form.submit()" class="select" style="width:auto; padding-right:6px;">
+          {% for s in studios %}
+            <option value="{{ s.id }}" {% if current_studio and current_studio.id == s.id %}selected{% endif %}>
+              {{ s.display_name }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    {% else %}
+      <span>{{ topbar_meta|default('') }}</span>
+    {% endif %}
+    {% if context is defined and context %}
+      {% if context.settings.dry_run %}
+        <span class="badge badge--warning" style="margin-left:10px;">dry-run</span>
+      {% endif %}
+      {% if not context.is_fully_configured %}
+        <span class="badge badge--danger" style="margin-left:10px;">未認証</span>
+      {% endif %}
+    {% endif %}
+  </div>
+</header>

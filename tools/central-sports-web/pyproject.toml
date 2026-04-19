@@ -1,0 +1,20 @@
+[project]
+name = "central-sports-web"
+version = "0.1.0"
+description = "セントラルスポーツの定期予約を自動化する常駐 Web アプリ"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# B008: FastAPI の Depends(...) はデフォルト引数での使用が慣習
+# UP042: str+Enum は Python<3.11 互換目的で意図的に残す（StrEnum も可）
+ignore = ["E501", "B008", "UP042"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

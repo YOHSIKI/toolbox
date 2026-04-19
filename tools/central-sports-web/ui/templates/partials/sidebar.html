@@ -1,0 +1,45 @@
+{% set active_nav = active_nav|default('') %}
+<aside class="nav">
+  <div class="nav-brand">
+    <img class="nav-brand-mark" src="{{ url_for('static', path='/img/favicon-64.png') }}" alt="Central Sports">
+    <div class="nav-brand-name">central-sports</div>
+  </div>
+
+  <div>
+    <div class="nav-section-title">メイン</div>
+    <ul class="nav-list">
+      <li>
+        <a class="nav-item {% if active_nav == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/>
+            <rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>
+          </svg>
+          ダッシュボード
+        </a>
+      </li>
+      <li>
+        <a class="nav-item {% if active_nav == 'reserve' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          予約
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <div class="nav-footer">
+    <span class="nav-footer-dot"></span>
+    <div>
+      {% if context is defined and context and context.is_fully_configured %}
+        <div style="font-weight:500; color:var(--text);">ログイン中</div>
+        <div>常駐プロセス稼働中</div>
+      {% else %}
+        <div style="font-weight:500; color:var(--danger);">未認証</div>
+        <div>secrets が読み込めていません</div>
+      {% endif %}
+    </div>
+  </div>
+</aside>

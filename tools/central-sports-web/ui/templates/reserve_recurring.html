@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}定期予約 — central-sports-web{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <a class="tab {% if active_tab == 'single' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}">単発予約</a>
+  <a class="tab {% if active_tab == 'recurring' %}is-active{% endif %}" href="{{ url_for('recurring_list') }}">定期予約</a>
+</div>
+
+{% if error %}
+<div class="card" style="border-left:3px solid var(--warning); padding:12px 18px; margin-bottom:16px; background:var(--warning-soft);">
+  <span class="muted">{{ error }}</span>
+</div>
+{% endif %}
+
+<div class="recurring-layout">
+
+  <aside class="picker">
+    <div class="picker-head">
+      <h3>定期予約一覧</h3>
+      <a class="btn" href="{{ url_for('recurring_new') }}">＋ 追加</a>
+    </div>
+    <div class="picker-list">
+      {% if items %}
+        {% for item in items %}
+          {% set sel = current and current.id == item.id %}
+          <a class="picker-item {% if sel %}is-selected{% endif %} {% if item.status.value != 'active' %}is-disabled{% endif %}"
+             href="?selected={{ item.id }}">
+            <div class="picker-name">{{ item.headline }}</div>
+            <div class="picker-sub">
+              {% if item.seat_preferences %}希望 {{ item.seat_preferences_as_labels() | join(' → ') }}{% else %}希望席 未設定{% endif %}
+              {% if item.status.value == 'paused' %} · 一時停止{% endif %}
+              {% if item.status.value == 'deleted' %} · 削除済み{% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      {% else %}
+        <div class="card-body muted" style="text-align:center;">
+          定期予約はまだありません。<br>
+          <a href="{{ url_for('recurring_new') }}">追加</a>してみましょう。
+        </div>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="detail">
+    {% if current %}
+    <div class="detail-head">
+      <div>
+        <div class="detail-title">{{ current.headline }}</div>
+        <div class="detail-meta">
+          <span>{{ studio.display_name if studio else '' }}</span>
+          <span class="list-meta-dot">·</span>
+          <span>希望席</span>
+          <div class="seat-chips">
+            {% for seat in current.seat_preferences %}
+              <span class="seat-chip {% if loop.first %}seat-chip--first{% endif %}">{{ '%02d' | format(seat) }}</span>
+            {% endfor %}
+            {% if not current.seat_preferences %}<span class="seat-chip">未設定</span>{% endif %}
+          </div>
+          <span class="list-meta-dot">·</span>
+          {% if current.status.value == 'active' %}
+            <span class="badge badge--success">有効</span>
+          {% elif current.status.value == 'paused' %}
+            <span class="badge badge--warning">一時停止</span>
+          {% else %}
+            <span class="badge badge--neutral">削除済み</span>
+          {% endif %}
+        </div>
+        {% if current.note %}
+          <div class="muted" style="margin-top:8px;">メモ: {{ current.note }}</div>
+        {% endif %}
+      </div>
+      <div class="detail-actions">
+        {% if current.status.value == 'active' %}
+          <form method="post" action="{{ url_for('recurring_pause', recurring_id=current.id) }}" style="display:inline;">
+            <button class="btn" type="submit">一時停止</button>
+          </form>
+        {% elif current.status.value == 'paused' %}
+          <form method="post" action="{{ url_for('recurring_resume', recurring_id=current.id) }}" style="display:inline;">
+            <button class="btn" type="submit">再開</button>
+          </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('recurring_delete', recurring_id=current.id) }}" style="display:inline;"
+              onsubmit="return confirm('この定期予約を削除しますか？');">
+          <button class="btn btn--danger-ghost" type="submit">削除</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">今後の配置</div>
+      <div class="occurrences">
+        {% if occurrences %}
+          {% for occ, label in occurrences %}
+          <div class="occurrence">
+            <div>
+              <div class="occurrence-date">{{ '%d/%d' | format(occ.lesson_date.month, occ.lesson_date.day) }}（{{ ['月','火','水','木','金','土','日'][occ.lesson_date.weekday()] }}）</div>
+              <div class="occurrence-date-sub">{{ label }}</div>
+            </div>
+            <div>
+              <div class="occurrence-title">{{ occ.lesson_time }} {{ occ.program_name }}</div>
+              <div class="occurrence-meta">
+                <span>担当 {{ occ.instructor_name or '未確定' }}</span>
+                {% for flag in occ.diff_flags %}
+                  <span class="badge badge--warning" style="font-size:10px; padding:1px 6px;">{{ flag }}</span>
+                {% endfor %}
+                <span class="list-meta-dot">·</span>
+                {% if occ.status == 'reserved' %}
+                  <span>予約済み</span>
+                {% else %}
+                  <span>{{ run_schedule_label(run_at=occ.scheduled_run_at, today=today) }}</span>
+                {% endif %}
+              </div>
+              {% if occ.alert_message %}
+                <div class="occurrence-alert">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  {{ occ.alert_message }}
+                </div>
+              {% endif %}
+            </div>
+            {% if occ.status == 'reserved' %}
+              <span class="badge badge--success">席 {{ '%02d' | format(occ.seat_no) if occ.seat_no is not none else '-' }} 予約済み</span>
+            {% elif occ.status == 'waiting' %}
+              <span class="badge badge--accent">予約待ち</span>
+            {% elif occ.status == 'attention' %}
+              <span class="badge badge--warning">要確認</span>
+            {% else %}
+              <span class="badge badge--neutral">予定</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="muted" style="padding:20px 0;text-align:center;">配置プレビューを作成できませんでした。</div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="detail-section">
+      <p class="muted" style="text-align:center;padding:40px 0;">
+        左の一覧から定期予約を選ぶか、「＋ 追加」で新しい定期予約を登録してください。
+      </p>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

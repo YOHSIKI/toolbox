@@ -1,0 +1,26 @@
+services:
+  web:
+    build: .
+    image: central-sports-web:latest
+    container_name: central-sports-web
+    restart: always
+    environment:
+      TZ: Asia/Tokyo
+      CSW_DRY_RUN: ${CSW_DRY_RUN:-true}
+      CSW_BASIC_AUTH_USER: ${CSW_BASIC_AUTH_USER:-admin}
+      CSW_BASIC_AUTH_PASSWORD: ${CSW_BASIC_AUTH_PASSWORD:-changeme}
+      CSW_BASIC_AUTH_ENABLED: ${CSW_BASIC_AUTH_ENABLED:-true}
+      CSW_SECRETS_DIR: /workspace/.secrets
+      CSW_SECRETS_GROUP: central-sports
+      CSW_DATA_DIR: /app/data
+      CSW_DISCORD_WEBHOOK_URL: ${CSW_DISCORD_WEBHOOK_URL:-}
+      CSW_DEFAULT_STUDIO_ID: ${CSW_DEFAULT_STUDIO_ID:-79}
+      CSW_DEFAULT_STUDIO_ROOM_ID: ${CSW_DEFAULT_STUDIO_ROOM_ID:-177}
+      CSW_DEFAULT_STUDIO_NAME: ${CSW_DEFAULT_STUDIO_NAME:-セントラルフィットネスクラブ府中}
+    volumes:
+      # シークレット（読み取り専用、hacomono の会員 ID/パスワードを Fernet 復号する）
+      - /volume1/infra/secrets:/workspace/.secrets:ro
+      # 永続データ（SQLite + device_id）。gateway コンテナの相対パス解決を避けるため絶対パス
+      - /volume1/toolbox/tools/central-sports-web/data:/app/data
+    ports:
+      - "${CSW_PORT:-8080}:8080"

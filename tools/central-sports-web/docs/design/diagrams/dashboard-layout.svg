@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 480" font-family="-apple-system, system-ui, 'Noto Sans JP', sans-serif">
+  <defs>
+    <style>
+      .bg    { fill: #f7f7f5; }
+      .card  { fill: #ffffff; stroke: #d4d4d1; stroke-width: 1; }
+      .accent-line  { fill: #c2410c; }
+      .success-line { fill: #15803d; }
+      .title { font-size: 14px; font-weight: 600; fill: #0a0a0a; letter-spacing: -0.01em; }
+      .subtitle { font-size: 11px; fill: #6b7280; }
+      .eyebrow  { font-size: 10px; font-weight: 600; fill: #8a8a84; letter-spacing: 0.12em; }
+      .sum-head { font-size: 18px; font-weight: 700; fill: #0a0a0a; letter-spacing: -0.02em; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="760" height="480"/>
+  <text x="40" y="32" class="eyebrow">DASHBOARD</text>
+  <text x="40" y="52" class="title" style="font-size:16px;">ダッシュボードの構成</text>
+
+  <!-- 当日サマリー -->
+  <g transform="translate(40, 76)">
+    <rect class="card" width="680" height="84" rx="6"/>
+    <rect class="success-line" x="0" y="0" width="3" height="84"/>
+    <text x="24" y="28" class="eyebrow" fill="#15803d">本日 04/19 日 · 予約結果</text>
+    <text x="24" y="52" class="sum-head">2 件 予約できました</text>
+    <text x="24" y="72" class="subtitle">第 1 希望 1 件 · 代替席 1 件 · 失敗 0 件</text>
+    <text x="660" y="30" class="subtitle" text-anchor="end">翌朝リセット</text>
+  </g>
+
+  <!-- 2カラム: 現在の予約 / 予約予定 -->
+  <g transform="translate(40, 180)">
+    <rect class="card" width="332" height="180" rx="6"/>
+    <text x="20" y="28" class="eyebrow">現在の予約</text>
+    <text x="20" y="52" class="title" style="font-size:15px;">確保済みの予約一覧</text>
+    <text x="20" y="74" class="subtitle">予約 API から取得した実データ</text>
+    <line x1="20" y1="92" x2="312" y2="92" stroke="#e5e5e5" stroke-width="1"/>
+    <text x="20" y="114" class="subtitle">· 日時 + プログラム + 席番号</text>
+    <text x="20" y="132" class="subtitle">· 担当者</text>
+    <text x="20" y="150" class="subtitle">· 席変更・取消ボタン</text>
+    <text x="20" y="168" class="subtitle">· 当日朝に取れたものも自動で反映</text>
+  </g>
+
+  <g transform="translate(388, 180)">
+    <rect class="card" width="332" height="180" rx="6"/>
+    <text x="20" y="28" class="eyebrow" fill="#c2410c">予約予定</text>
+    <text x="20" y="52" class="title" style="font-size:15px;">これから取りに行く予約</text>
+    <text x="20" y="74" class="subtitle">定期予約から導出された未来のみ</text>
+    <line x1="20" y1="92" x2="312" y2="92" stroke="#e5e5e5" stroke-width="1"/>
+    <text x="20" y="114" class="subtitle">· 日時 + プログラム + 希望席</text>
+    <text x="20" y="132" class="subtitle">· 「明日 9:00 に予約」などの予告</text>
+    <text x="20" y="150" class="subtitle">· 予約待ちバッジで状態表示</text>
+    <text x="20" y="168" class="subtitle">· 完了・失敗は載せない</text>
+  </g>
+
+  <!-- 予約履歴 -->
+  <g transform="translate(40, 380)">
+    <rect class="card" width="680" height="80" rx="6"/>
+    <text x="20" y="28" class="eyebrow">予約履歴</text>
+    <text x="20" y="50" class="title">過去の自動予約の結果</text>
+    <text x="20" y="68" class="subtitle">当日分は「今朝 9:00」ラベルで先頭に · 成功・代替成功・失敗を色分け</text>
+  </g>
+
+</svg>

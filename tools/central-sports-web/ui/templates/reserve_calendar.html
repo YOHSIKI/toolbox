@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}予約 — central-sports-web{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <a class="tab {% if active_tab == 'single' %}is-active{% endif %}" href="{{ url_for('reserve_calendar') }}">単発予約</a>
+  <a class="tab {% if active_tab == 'recurring' %}is-active{% endif %}" href="{{ url_for('recurring_list') }}">定期予約</a>
+</div>
+
+{% if error %}
+<div class="card" style="border-left:3px solid var(--warning); padding:12px 18px; margin-bottom:16px; background:var(--warning-soft);">
+  <span class="muted">{{ error }}</span>
+</div>
+{% endif %}
+
+{% if view %}
+{% if view.out_of_range %}
+<div class="card" style="border-left:3px solid var(--accent); padding:12px 18px; margin-bottom:16px; background:var(--accent-soft);">
+  <b>この週はまだ予約開放されていません。</b>
+  <span class="muted" style="margin-left:6px;">セントラルスポーツの予約開放は当日から 7 日先までです（{{ view.open_until.strftime('%-m/%-d') }} 分まで）。先の週のスケジュールは公開月間 API（別フェーズ）で対応予定です。</span>
+</div>
+{% endif %}
+<div class="toolbar">
+  <div class="toolbar-left">
+    <div class="select">
+      {{ studio.display_name }}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="wk-nav">
+      <a class="wk-nav-btn" href="{{ url_for('reserve_calendar') }}?week={{ prev_week }}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </a>
+      <div class="wk-nav-label">{{ view.week_start.strftime('%Y/%m/%d') }} — {{ view.week_end.strftime('%m/%d') }}</div>
+      <a class="wk-nav-btn" href="{{ url_for('reserve_calendar') }}?week={{ next_week }}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </a>
+    </div>
+    <a class="btn btn--ghost" href="{{ url_for('reserve_calendar') }}">今週</a>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch legend-swatch--available"></span>空きあり</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--reserved"></span>予約済み</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--target"></span>定期予約登録</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--full"></span>満席</div>
+  </div>
+</div>
+
+<div class="layout-with-panel">
+
+  <div class="cal">
+    <div class="cal-head"></div>
+    {% for day in view.days %}
+      {% set is_today = (day == today) %}
+      {% set weekday = day.weekday() %}
+      <div class="cal-head">
+        <div class="cal-head-day {% if is_today %}cal-head-day--today{% endif %}">{{ day.day }}</div>
+        {% if weekday == 5 %}
+          <span class="cal-head-weekday--sat">土</span>
+        {% elif weekday == 6 %}
+          <span class="cal-head-weekday--sun">日</span>
+        {% else %}
+          {{ weekday_labels[weekday] }}
+        {% endif %}
+      </div>
+    {% endfor %}
+
+    {% for row in view.rows %}
+      {% set hour = row[0].hour %}
+      <div class="cal-time">{{ '%02d:00' | format(hour) }}</div>
+      {% for cell in row %}
+        <div class="cal-cell">
+          {% for lesson in cell.lessons %}
+            {% set cls = 'lesson lesson--available' %}
+            {% if lesson.state.value == 'reserved' %}{% set cls = 'lesson lesson--reserved' %}
+            {% elif lesson.state.value == 'target' %}{% set cls = 'lesson lesson--target' %}
+            {% elif lesson.state.value == 'full' %}{% set cls = 'lesson lesson--full' %}
+            {% elif lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--full' %}
+            {% endif %}
+            <a class="{{ cls }}" href="?week={{ view.week_start.isoformat() }}&date={{ lesson.lesson_date.isoformat() }}&program={{ lesson.program_id }}&time={{ lesson.start_time }}">
+              {% if lesson.state.value == 'target' %}<span class="lesson-star">★</span>{% endif %}
+              <div class="lesson-time mono">{{ lesson.start_time }}{% if lesson.end_time %}–{{ lesson.end_time }}{% endif %}</div>
+              <div class="lesson-name">{{ lesson.program_name }}</div>
+              <div class="lesson-sub">
+                {% if lesson.state.value == 'reserved' %}
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>席 {{ '%02d' | format(lesson.reserved_seat_no) if lesson.reserved_seat_no is not none else '-' }}</span>
+                {% elif lesson.state.value == 'full' %}
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>満席</span>
+                {% elif lesson.state.value == 'unreservable' %}
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>受付外</span>
+                {% else %}
+                  <span>{{ lesson.instructor_name or '-' }}</span>
+                  {% if lesson.remaining_seats is not none %}<span>残 {{ lesson.remaining_seats }}</span>{% endif %}
+                {% endif %}
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+
+  <aside class="panel {% if not view.selected_lesson %}panel--empty{% endif %}">
+    {% if view.selected_lesson %}
+      {% set lesson = view.selected_lesson %}
+      {% set return_to = '/reserve?week=' + view.week_start.isoformat() %}
+      <div class="panel-header">
+        <div class="panel-date">{{ '%02d/%02d' | format(lesson.lesson_date.month, lesson.lesson_date.day) }} {{ ['月','火','水','木','金','土','日'][lesson.lesson_date.weekday()] }} {{ lesson.start_time }}{% if lesson.end_time %} – {{ lesson.end_time }}{% endif %}</div>
+        <div class="panel-title">{{ lesson.program_name }}</div>
+        <div class="panel-meta">
+          <span>担当 {{ lesson.instructor_name or '未定' }}</span>
+          <span class="list-meta-dot">·</span>
+          <span>{{ studio.display_name }}</span>
+          {% if lesson.state.value == 'reserved' %}
+            <span class="list-meta-dot">·</span>
+            <span class="badge badge--success">席 {{ '%02d' | format(lesson.reserved_seat_no) if lesson.reserved_seat_no is not none else '-' }} 予約済</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="panel-body">
+      {% if lesson.state.value == 'reserved' %}
+        <form method="post" action="{{ url_for('reserve_change_seat', reservation_id=lesson.reserved_reservation_id) }}" id="reserve-form" class="stack stack-sm">
+          <input type="hidden" name="return_to" value="{{ return_to }}">
+          <label class="field-label">
+            席変更{% if view.selected_seat_map and view.selected_seat_map.capacity %}（定員 {{ view.selected_seat_map.capacity }}）{% endif %}
+          </label>
+          <div class="seat-grid">
+            {% if view.selected_seat_map and view.selected_seat_map.capacity %}
+              {% for i in range(1, view.selected_seat_map.capacity + 1) %}
+                {% set taken = i in view.selected_seat_map.taken_nos %}
+                {% set is_current = (i == lesson.reserved_seat_no) %}
+                <label class="seat {% if taken and not is_current %}seat--taken{% endif %} {% if is_current %}seat--selected{% endif %}">
+                  <input type="radio" name="new_seat_no" value="{{ i }}" {% if taken and not is_current %}disabled{% endif %} {% if is_current %}checked{% endif %} style="display:none;">
+                  {{ '%02d' | format(i) }}
+                </label>
+              {% endfor %}
+            {% else %}
+              <div class="muted">座席情報を取得できませんでした</div>
+            {% endif %}
+          </div>
+          <div class="muted" style="font-size:11px;">別の席を選んで「席を変更」を押してください。</div>
+        </form>
+      {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}
+        <p class="muted">現在このレッスンは予約できません。</p>
+      {% else %}
+        <form method="post" action="{{ url_for('reserve_create') }}" id="reserve-form" class="stack stack-sm">
+          <input type="hidden" name="studio_lesson_id" value="{{ lesson.studio_lesson_id }}">
+          <input type="hidden" name="lesson_date" value="{{ lesson.lesson_date.isoformat() }}">
+          <input type="hidden" name="lesson_time" value="{{ lesson.start_time }}">
+          <input type="hidden" name="program_id" value="{{ lesson.program_id }}">
+          <input type="hidden" name="program_name" value="{{ lesson.program_name }}">
+          <input type="hidden" name="instructor_name" value="{{ lesson.instructor_name or '' }}">
+
+          <label class="field-label">
+            {% if view.selected_seat_map and view.selected_seat_map.capacity %}
+              座席（空き {{ view.selected_seat_map.capacity - view.selected_seat_map.taken_nos|length }} / 定員 {{ view.selected_seat_map.capacity }}）
+            {% else %}
+              座席
+            {% endif %}
+          </label>
+          <div class="seat-grid">
+            {% if view.selected_seat_map and view.selected_seat_map.capacity %}
+              {% for i in range(1, view.selected_seat_map.capacity + 1) %}
+                {% set taken = i in view.selected_seat_map.taken_nos %}
+                <label class="seat {% if taken %}seat--taken{% endif %}">
+                  <input type="radio" name="seat_no" value="{{ i }}" {% if taken %}disabled{% endif %} style="display:none;">
+                  {{ '%02d' | format(i) }}
+                </label>
+              {% endfor %}
+            {% else %}
+              <div class="muted">座席情報を取得できませんでした</div>
+            {% endif %}
+          </div>
+          <div class="muted" style="font-size:11px;">席を選んで「予約する」を押してください。</div>
+        </form>
+      {% endif %}
+      </div>
+      <div class="panel-footer">
+        {% if lesson.state.value == 'reserved' %}
+          <form method="post" action="{{ url_for('reserve_cancel', reservation_id=lesson.reserved_reservation_id) }}"
+                onsubmit="return confirm('{{ lesson.program_name }} の予約を取り消しますか？');" style="flex:1;">
+            <input type="hidden" name="return_to" value="{{ return_to }}">
+            <button class="btn btn--danger-ghost" type="submit" style="width:100%;">取消</button>
+          </form>
+          <button class="btn btn--primary" form="reserve-form" type="submit">席を変更</button>
+        {% elif lesson.state.value in ['full', 'unreservable'] %}
+          <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}" style="flex:1;justify-content:center;">閉じる</a>
+        {% else %}
+          <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
+          <button class="btn btn--primary" form="reserve-form" type="submit">予約する</button>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="panel-empty">
+        <div class="panel-empty-title">レッスンを選択</div>
+        <div class="panel-empty-sub">左のカレンダーから予約したいレッスンをクリックすると、<br>ここに詳細と座席が表示されます。</div>
+      </div>
+    {% endif %}
+  </aside>
+
+</div>
+{% else %}
+  <div class="card"><div class="card-body muted" style="text-align:center;">スケジュールを表示できません。</div></div>
+{% endif %}
+{% endblock %}
+
+{% block head_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // seat radio のクリックで submit（UI シンプル化）
+  document.querySelectorAll('.seat-grid label.seat').forEach(function(label) {
+    label.addEventListener('click', function(ev) {
+      var input = label.querySelector('input[type=radio]');
+      if (input && !input.disabled) {
+        input.checked = true;
+        document.querySelectorAll('.seat-grid label.seat').forEach(function(l) {
+          l.classList.remove('seat--selected');
+        });
+        label.classList.add('seat--selected');
+      }
+    });
+  });
+});
+</script>
+{% endblock %}

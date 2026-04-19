@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 500" font-family="-apple-system, system-ui, 'Noto Sans JP', sans-serif">
+  <defs>
+    <style>
+      .bg    { fill: #f7f7f5; }
+      .card  { fill: #ffffff; stroke: #d4d4d1; stroke-width: 1; }
+      .accent-line  { fill: #c2410c; }
+      .title { font-size: 14px; font-weight: 600; fill: #0a0a0a; letter-spacing: -0.01em; }
+      .subtitle { font-size: 11px; fill: #6b7280; }
+      .eyebrow  { font-size: 10px; font-weight: 600; fill: #8a8a84; letter-spacing: 0.12em; }
+      .tab-inactive { fill: #6b7280; font-size: 13px; font-weight: 500; }
+      .tab-active { fill: #c2410c; font-size: 13px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="840" height="500"/>
+  <text x="40" y="32" class="eyebrow">RESERVE SCREEN</text>
+  <text x="40" y="52" class="title" style="font-size:16px;">予約画面 · 定期予約タブの構成</text>
+
+  <!-- タブ -->
+  <g transform="translate(40, 76)">
+    <line x1="0" y1="34" x2="760" y2="34" stroke="#d4d4d1" stroke-width="1"/>
+    <text x="20" y="24" class="tab-inactive">単発予約</text>
+    <text x="120" y="24" class="tab-active">定期予約</text>
+    <rect x="110" y="32" width="72" height="2" fill="#c2410c"/>
+  </g>
+
+  <!-- 2カラムレイアウト -->
+  <!-- 左: 定期予約一覧ピッカー -->
+  <g transform="translate(40, 130)">
+    <rect class="card" width="240" height="340" rx="6"/>
+    <text x="20" y="30" class="eyebrow">LEFT PANE</text>
+    <text x="20" y="52" class="title">定期予約一覧</text>
+    <text x="20" y="70" class="subtitle">登録済みのルールをピッカー表示</text>
+    <line x1="20" y1="86" x2="220" y2="86" stroke="#e5e5e5" stroke-width="1"/>
+
+    <!-- ピッカーアイテム -->
+    <g transform="translate(12, 100)">
+      <rect width="216" height="48" fill="#fff4ed" stroke="none"/>
+      <rect class="accent-line" x="0" y="0" width="3" height="48"/>
+      <text x="12" y="20" class="title" style="font-size:12px;">毎週 火 10:00 GroupPower</text>
+      <text x="12" y="36" class="subtitle">希望 21→15→08 · 次回 4/28</text>
+    </g>
+    <g transform="translate(12, 152)">
+      <text x="12" y="20" class="subtitle" style="font-size:12px;">毎週 火 19:00 BodyJam</text>
+      <text x="12" y="36" class="subtitle">希望 05→12→20 · 次回 4/28</text>
+    </g>
+    <g transform="translate(12, 200)">
+      <text x="12" y="20" class="subtitle" style="font-size:12px;">毎週 木 19:30 BodyCombat</text>
+      <text x="12" y="36" class="subtitle">希望 03→09 · 次回 4/30</text>
+    </g>
+    <g transform="translate(12, 248)">
+      <text x="12" y="20" class="subtitle" style="font-size:12px;">毎週 土 11:00 GroupFIT</text>
+      <text x="12" y="36" class="subtitle">希望 18→25 · 次回 5/2</text>
+    </g>
+    <text x="20" y="320" class="subtitle" fill="#8a8a84">… 一時停止中なども含む</text>
+  </g>
+
+  <!-- 右: 選択中の詳細 -->
+  <g transform="translate(300, 130)">
+    <rect class="card" width="500" height="340" rx="6"/>
+    <text x="20" y="30" class="eyebrow">RIGHT PANE (選択中の定期予約)</text>
+    <text x="20" y="54" class="title" style="font-size:15px;">毎週 火曜 10:00 GroupPower 55</text>
+    <text x="20" y="72" class="subtitle">希望席 21 → 15 → 08 · 編集 / 一時停止 / 削除</text>
+    <line x1="20" y1="88" x2="480" y2="88" stroke="#e5e5e5" stroke-width="1"/>
+
+    <text x="20" y="112" class="eyebrow">今後の配置</text>
+
+    <!-- occurrence 1 -->
+    <g transform="translate(20, 124)">
+      <rect width="460" height="40" fill="#fafaf8" rx="4"/>
+      <text x="12" y="18" class="title" style="font-size:12px;">4/21 火 · 10:00 GroupPower 55</text>
+      <text x="12" y="32" class="subtitle">担当 福田 · 残 12 · 席 21 予約済み</text>
+    </g>
+
+    <!-- occurrence 2 -->
+    <g transform="translate(20, 170)">
+      <rect width="460" height="40" fill="#fafaf8" rx="4"/>
+      <text x="12" y="18" class="title" style="font-size:12px;">4/28 火 · 10:00 GroupPower 55</text>
+      <text x="12" y="32" class="subtitle">担当 未確定 · 明日 9:00 に予約（予約待ち）</text>
+    </g>
+
+    <!-- occurrence 3 (差分: 代行) -->
+    <g transform="translate(20, 216)">
+      <rect width="460" height="40" fill="#fafaf8" rx="4"/>
+      <text x="12" y="18" class="title" style="font-size:12px;">5/12 火 · 10:00 GroupPower 55</text>
+      <text x="12" y="32" class="subtitle" fill="#b45309">担当 鈴木 · 代行の予告あり</text>
+    </g>
+
+    <!-- occurrence 4 (差分: 時間変更) -->
+    <g transform="translate(20, 262)">
+      <rect width="460" height="40" fill="#fafaf8" rx="4"/>
+      <text x="12" y="18" class="title" style="font-size:12px;">5/19 火 · 9:45 GroupPower 45（短縮）</text>
+      <text x="12" y="32" class="subtitle" fill="#b45309">時間変更・プログラム短縮の予告あり ⚠</text>
+    </g>
+
+    <text x="20" y="320" class="subtitle" fill="#8a8a84">その下に「最近の予約結果」を表示</text>
+  </g>
+
+</svg>
