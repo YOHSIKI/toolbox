@@ -16,8 +16,11 @@
 {% if view %}
 {% if view.out_of_range %}
 <div class="card" style="border-left:3px solid var(--accent); padding:12px 18px; margin-bottom:16px; background:var(--accent-soft);">
-  <b>この週はまだ予約開放されていません。</b>
-  <span class="muted" style="margin-left:6px;">セントラルスポーツの予約開放は当日から 7 日先までです（{{ view.open_until.strftime('%-m/%-d') }} 分まで）。先の週のスケジュールは公開月間 API（別フェーズ）で対応予定です。</span>
+  <b>この週は予約開放前です。</b>
+  <span class="muted" style="margin-left:6px;">
+    予約開放は毎日 09:00 に 7 日先までです（最終確定: {{ view.open_until.strftime('%-m/%-d') }} 分まで）。
+    レッスンをクリックすると、対象日の 7 日前 09:00 に自動予約する「予約予定」を登録できます。
+  </span>
 </div>
 {% endif %}
 <div class="toolbar">
@@ -52,6 +55,7 @@
     <div class="legend-item"><span class="legend-swatch legend-swatch--reserved"></span>予約済み</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--target"></span>定期予約登録</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--full"></span>満席</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--pending"></span>予約開放前（予約予定可）</div>
   </div>
 </div>
 
@@ -84,9 +88,12 @@
             {% if lesson.state.value == 'reserved' %}{% set cls = 'lesson lesson--reserved' %}
             {% elif lesson.state.value == 'target' %}{% set cls = 'lesson lesson--target' %}
             {% elif lesson.state.value == 'full' %}{% set cls = 'lesson lesson--full' %}
-            {% elif lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--full' %}
+            {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}{% set cls = 'lesson lesson--past' %}
+            {% elif lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--pending' %}
             {% endif %}
-            <a class="{{ cls }}" href="?week={{ view.week_start.isoformat() }}&date={{ lesson.lesson_date.isoformat() }}&program={{ lesson.program_id }}&time={{ lesson.start_time }}">
+            {% set sel = view.selected_lesson %}
+            {% set is_selected = sel is not none and sel.lesson_date == lesson.lesson_date and sel.start_time == lesson.start_time and sel.program_id == lesson.program_id %}
+            <a class="{{ cls }}{% if is_selected %} lesson--is-selected{% endif %}" href="?week={{ view.week_start.isoformat() }}&date={{ lesson.lesson_date.isoformat() }}&program={{ lesson.program_id }}&time={{ lesson.start_time }}">
               {% if lesson.state.value == 'target' %}<span class="lesson-star">★</span>{% endif %}
               <div class="lesson-time mono">{{ lesson.start_time }}{% if lesson.end_time %}–{{ lesson.end_time }}{% endif %}</div>
               <div class="lesson-name">{{ lesson.program_name }}</div>
@@ -95,8 +102,10 @@
                   <span>{{ lesson.instructor_name or '-' }}</span><span>席 {{ '%02d' | format(lesson.reserved_seat_no) if lesson.reserved_seat_no is not none else '-' }}</span>
                 {% elif lesson.state.value == 'full' %}
                   <span>{{ lesson.instructor_name or '-' }}</span><span>満席</span>
+                {% elif lesson.state.value == 'unreservable' and lesson.lesson_date < today %}
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>開催済</span>
                 {% elif lesson.state.value == 'unreservable' %}
-                  <span>{{ lesson.instructor_name or '-' }}</span><span>受付外</span>
+                  <span>{{ lesson.instructor_name or '-' }}</span><span>予約予定 可</span>
                 {% else %}
                   <span>{{ lesson.instructor_name or '-' }}</span>
                   {% if lesson.remaining_seats is not none %}<span>残 {{ lesson.remaining_seats }}</span>{% endif %}
