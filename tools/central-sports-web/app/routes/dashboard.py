@@ -33,18 +33,6 @@ def dashboard(
 ) -> HTMLResponse:
     now = datetime.now(tz=context.settings.tz)
     today = now.date()
-    # 外部で取った予約を「現在の予約」に反映する sync は、UI レスポンスを
-    # ブロックしないようバックグラウンドスレッドで間引き実行する。sync 自体は
-    # 50 件の upsert + 履歴リカバリで数秒〜数十秒かかるため、同期実行すると
-    # ダッシュボード表示が待たされてしまう。次回アクセスから最新が反映される。
-    if context.sync_reservations is not None:
-        import threading
-
-        threading.Thread(
-            target=context.sync_reservations.run_if_stale,
-            name="dashboard-bg-sync",
-            daemon=True,
-        ).start()
     data = context.dashboard.build(today=today, now=now)
     studios = studio_repo.list_studios(context.db_path)
     current_studio = resolve_current_studio(request, context.db_path)

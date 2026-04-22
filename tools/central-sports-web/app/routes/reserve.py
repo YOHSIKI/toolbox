@@ -37,10 +37,6 @@ def reserve_calendar(
     today = datetime.now(tz=context.settings.tz).date()
     week_start = resolve_week_start(week, today=today)
 
-    # 本家マイページなど外部で取った予約を取り込むため、軽く同期をかける（5 分に 1 回）
-    if context.sync_reservations is not None:
-        context.sync_reservations.run_if_stale()
-
     studio = resolve_current_studio(request, context.db_path)
     studios = studio_repo.list_studios(context.db_path)
     if studio is None:
