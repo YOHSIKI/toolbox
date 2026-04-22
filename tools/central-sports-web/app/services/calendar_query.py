@@ -67,14 +67,41 @@ class CalendarQueryService:
         lessons: list[Lesson] = []
         if not out_of_range:
             lessons = self._gateway.fetch_week(studio.ref, week_start, days=7)
-            self._annotate_reserved_state(lessons)
+            self._annotate_reserved_state(lessons, today=today)
+            # release_pending（本日 9:00 開放予定）な枠に対して、定期予約に
+            # 一致するなら TARGET（青）表示にする。auto_booking が 9:00 に
+            # 拾うため、ユーザーに「自動で予約される枠」だと知らせる。
+            self._annotate_recurring_state(lessons, today=today)
             # 今週画面でも金曜定休日・祝日特別日を「休館」として表示したい。
             # 公開月間 API 経由で closed_dates を取得（gateway キャッシュがあるので軽い）。
             closed_days = self._fetch_closed_days(studio, week_start)
+            # reserve API は朝 9:00 に「今日+6 日」を新規解放する。9:00 前の
+            # 時点では末尾日（今日+6 日）のレッスンがまだ取得できず、カレンダーの
+            # 該当列が空になる。このギャップを公開月間 API から補完する。
+            covered_dates = {lesson.lesson_date for lesson in lessons}
+            week_dates = {week_start + timedelta(days=i) for i in range(7)}
+            missing_dates = week_dates - covered_dates - set(closed_days)
+            # 過去の日付は補完しない（本当に空だった可能性が高く、後追い情報が誤解を招く）。
+            missing_dates = {d for d in missing_dates if d >= today}
+            if missing_dates:
+                public_lessons = self._fetch_public_monthly_week(studio, week_start)
+                fill = [l for l in public_lessons if l.lesson_date in missing_dates]
+                if fill:
+                    for lesson in fill:
+                        # reserve API がまだ開放していない枠。UI では予約予定の
+                        # 登録対象として扱う。
+                        lesson.release_pending = True
+                    self._annotate_recurring_state(fill, today=today)
+                    lessons.extend(fill)
+                    logger.info(
+                        "build_week filled missing dates from public monthly: "
+                        "dates=%s fill_lessons=%d",
+                        sorted(missing_dates), len(fill),
+                    )
         else:
             # 未開放週は公開月間 API から取得する。公開月間 API には座席レイアウト
             # 情報が含まれないため、先に reserve API（今日〜+6 日）を叩いて
-            # gateway 側の `_weekday_time_space` / `_space_index` を温めておく。
+            # gateway 側の `_hint_full` / `_hint_name` / `_hint_time` / `_space_index` を温めておく。
             # これにより、同一店舗・同一曜日・同一時刻の lesson に対して同じ
             # studio_room_space_id とレイアウトを復元できる。
             # gateway に 30 秒 TTL キャッシュがあるため、同一リクエスト内の重複
@@ -87,7 +114,7 @@ class CalendarQueryService:
             closed_days = self._fetch_closed_days(studio, week_start)
             # out_of_range でも recurring が当たる lesson は TARGET 化する。
             # reserve API 経路と違い、reservation / FULL / UNRESERVABLE の判定材料はない。
-            self._annotate_recurring_state(lessons)
+            self._annotate_recurring_state(lessons, today=today)
         self._annotate_intent_state(lessons)
         logger.info(
             "build_week studio=%s week=%s out_of_range=%s lessons=%d",
@@ -95,8 +122,8 @@ class CalendarQueryService:
         )
 
         settings_hours = (
-            self._settings.calendar_start_hour if self._settings else self._hour_range[0],
-            self._settings.calendar_end_hour if self._settings else self._hour_range[1],
+            self._settings.calendar_start_time if self._settings else self._hour_range[0],
+            self._settings.calendar_end_time if self._settings else self._hour_range[1],
         )
         hours = list(range(settings_hours[0], settings_hours[1] + 1))
         days = [week_start + timedelta(days=i) for i in range(7)]
@@ -210,12 +237,18 @@ class CalendarQueryService:
 
     # --- 内部 -------------------------------------------------------
 
-    def _annotate_reserved_state(self, lessons: list[Lesson]) -> None:
+    def _annotate_reserved_state(
+        self, lessons: list[Lesson], *, today: date
+    ) -> None:
         """reserve API 経路向けの annotate。
 
         reservation > recurring (TARGET) > FULL > UNRESERVABLE > AVAILABLE の
         優先順位で state を確定する。intent の付与は別メソッド
         `_annotate_intent_state` で行う。
+
+        recurring の TARGET 化は「今日+6 日より後」に限る。予約 API の開放済み
+        範囲（today〜today+6）は定期予約ジョブが既に走り終わった後なので、
+        カレンダーに青塗りしても予約は取れず、ユーザーを惑わせるだけ。
         """
 
         reservations = reservation_repo.list_reservations(self._db_path)
@@ -225,6 +258,7 @@ class CalendarQueryService:
             if r.studio_lesson_id
         }
         recurring_index = self._build_recurring_index()
+        recurring_target_from = today + timedelta(days=7)
         for lesson in lessons:
             key = (lesson.studio_lesson_id, lesson.lesson_date, lesson.start_time)
             reservation = reservation_index.get(key)
@@ -241,17 +275,31 @@ class CalendarQueryService:
                 lesson.studio_id,
                 lesson.studio_room_id,
             )
-            if recur_key in recurring_index:
+            if (
+                lesson.lesson_date >= recurring_target_from
+                and recur_key in recurring_index
+            ):
                 lesson.state = LessonState.TARGET
                 continue
             if lesson.remaining_seats == 0:
                 lesson.state = LessonState.FULL
             elif not lesson.is_reservable:
-                lesson.state = LessonState.UNRESERVABLE
+                # reserve API は「今日+6 日」の枠を朝 9:00 前から is_reservable=False で
+                # 返してくることがある（開放直前の暫定状態）。この枠はまだ予約不可だが、
+                # 事前に予約予定（intent）を登録しておけば 9:00 に自動で取れる。
+                # よって「予約不可」ではなく release_pending として intent 登録対象に回す。
+                release_day = today + timedelta(days=6)
+                if lesson.lesson_date == release_day:
+                    lesson.release_pending = True
+                    lesson.state = LessonState.AVAILABLE
+                else:
+                    lesson.state = LessonState.UNRESERVABLE
             else:
                 lesson.state = LessonState.AVAILABLE
 
-    def _annotate_recurring_state(self, lessons: list[Lesson]) -> None:
+    def _annotate_recurring_state(
+        self, lessons: list[Lesson], *, today: date
+    ) -> None:
         """公開月間 API 経路向け：recurring に一致する lesson を TARGET 化する。
 
         reservation / FULL / UNRESERVABLE の判定材料がないため、recurring に
@@ -260,6 +308,10 @@ class CalendarQueryService:
         公開月間 API の `progcd` と reserve API の `program_id` は値が異なる
         ことがある（別コード体系）。そのため、曜日+時刻+program_id で引いて
         ヒットしなければ、曜日+時刻+program_name で再照合する。
+
+        recurring の TARGET 化は「今日+6 日より後」に限る（実行タイミングが
+        既に過ぎている週は対象外）。out_of_range の公開月間 API 経路では
+        通常 today+6 以前の週は渡ってこないが、保険として同じフィルタを掛ける。
         """
 
         recurring_items = [
@@ -268,6 +320,7 @@ class CalendarQueryService:
         ]
         if not recurring_items:
             return
+        recurring_target_from = today + timedelta(days=7)
         id_index = {
             (r.day_of_week, r.start_time, r.program_id, r.studio_id, r.studio_room_id): r
             for r in recurring_items
@@ -287,6 +340,11 @@ class CalendarQueryService:
         }
         for lesson in lessons:
             if lesson.state is LessonState.RESERVED:
+                continue
+            # release_pending（本日 9:00 に開放される枠）は today+6 なので
+            # 通常の境界（today+7）に満たないが、auto_booking が当日 9:00 に
+            # 定期予約を拾いにいく対象のため TARGET 化対象に含める。
+            if lesson.lesson_date < recurring_target_from and not lesson.release_pending:
                 continue
             studio_tuple = (lesson.studio_id, lesson.studio_room_id)
             id_key = (

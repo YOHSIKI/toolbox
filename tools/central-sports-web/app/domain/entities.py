@@ -121,6 +121,10 @@ class Lesson:
     # を保存する。observed_lessons merge で program_id が reserve 側の数値 ID に
     # 上書きされても、source_progcd は残り、後段の alias 学習・lookup で使う。
     source_progcd: str | None = None
+    # reserve API がまだ新日を開放していない朝 9:00 前の末尾日について、
+    # 公開月間 API から補完した lesson はこのフラグを立てる。UI 側では未開放週
+    # と同様に「予約予定（intent）」の登録フォームを出す。
+    release_pending: bool = False
 
     @property
     def is_full(self) -> bool:

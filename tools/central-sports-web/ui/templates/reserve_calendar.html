@@ -207,7 +207,7 @@
             <a class="btn btn--ghost" href="{{ url_for('recurring_list') }}">定期予約一覧を開く</a>
           </div>
         </div>
-      {% elif view.out_of_range %}
+      {% elif view.out_of_range or lesson.release_pending %}
         <form method="post" action="{{ url_for('intent_create') }}" id="reserve-form" class="stack stack-sm">
           <input type="hidden" name="return_to" value="{{ return_to }}">
           <input type="hidden" name="lesson_date" value="{{ lesson.lesson_date.isoformat() }}">
@@ -215,7 +215,11 @@
           <input type="hidden" name="program_id" value="{{ lesson.program_id }}">
           <input type="hidden" name="program_name" value="{{ lesson.program_name }}">
           <div class="muted" style="font-size:12px; line-height:1.5;">
-            対象日の 7 日前 09:00 に自動で予約を取りにいく<b>予約予定</b>を登録できます。
+            {% if lesson.release_pending %}
+              本日 09:00 に予約が開放されます。事前に<b>予約予定</b>を登録しておくと、開放時に自動で席を取りにいきます。
+            {% else %}
+              対象日の 7 日前 09:00 に自動で予約を取りにいく<b>予約予定</b>を登録できます。
+            {% endif %}
           </div>
           {% if view.selected_seat_map and view.selected_seat_map.positions %}
             <label class="field-label">希望席（クリックで優先順位、もう一度で解除）</label>
@@ -311,7 +315,7 @@
           <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="更新中…">希望席を更新</button>
         {% elif lesson.state.value == 'target' %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}" style="flex:1;justify-content:center;">閉じる</a>
-        {% elif view.out_of_range %}
+        {% elif view.out_of_range or lesson.release_pending %}
           <a class="btn" href="{{ url_for('reserve_calendar') }}?week={{ view.week_start.isoformat() }}">閉じる</a>
           <button class="btn btn--primary" form="reserve-form" type="submit" data-loading-text="登録中…">予約予定を登録</button>
         {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}

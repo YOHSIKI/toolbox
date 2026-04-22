@@ -25,6 +25,7 @@ from app.domain.entities import (
     UpcomingReservation,
     next_weekday,
 )
+from app.utils.program_similarity import similarity_ensemble
 from config.settings import Settings
 from db.repositories import (
     history_repo,
@@ -96,7 +97,7 @@ class DashboardQueryService:
 
         recent_history = history_repo.list_recent(
             self._db_path,
-            limit=30,
+            limit=self._settings.history_display_limit,
             categories=[HistoryCategory.AUTOMATION, HistoryCategory.MANUAL],
         )
 
@@ -151,6 +152,26 @@ class DashboardQueryService:
                 # プログラム名が None / 空文字列のときは変更検知から除外
                 if not expected or not actual:
                     continue
+                diff_flags = list(occ.diff_flags)
+                # 「プログラム変更」flag が付いていても、新旧名が表記揺れ程度に
+                # 近ければ（median >= settings.alias_sim_accept）通知は抑制する。
+                # hacomono_gateway の alias 学習ゲートと同じ閾値を共有。
+                # 「時間変更」のみの flag は類似度に関係なく従来通り通知する。
+                if "プログラム変更" in diff_flags and expected != actual:
+                    scores = similarity_ensemble(actual, expected)
+                    median = scores["median"]
+                    if median >= self._settings.alias_sim_accept:
+                        logger.info(
+                            "program_change_notify skipped progcd=%s "
+                            "new=%r old=%r median=%.2f (similar enough)",
+                            item.program_id, actual, expected, median,
+                        )
+                        continue
+                    logger.info(
+                        "program_change_notify issued progcd=%s "
+                        "new=%r old=%r median=%.2f",
+                        item.program_id, actual, expected, median,
+                    )
                 alerts.append(
                     ProgramChangeAlert(
                         recurring_id=item.id,
@@ -158,7 +179,7 @@ class DashboardQueryService:
                         lesson_time=occ.lesson_time,
                         expected_name=expected,
                         actual_name=actual,
-                        diff_flags=list(occ.diff_flags),
+                        diff_flags=diff_flags,
                         alert_message=occ.alert_message,
                     )
                 )
@@ -180,7 +201,11 @@ class DashboardQueryService:
         カードとして items に残す。move（席変更）は結果に影響しないため無視する。
         """
 
-        reserve_endpoints = {"reservation.create", "reservation.reserve"}
+        reserve_endpoints = {
+            "reservation.create",
+            "reservation.reserve",
+            "intent.reserve",
+        }
         cancel_endpoints = {"reservation.cancel"}
 
         def _key(meta: dict | None) -> tuple[str, str, str]:
@@ -285,13 +310,29 @@ class DashboardQueryService:
             (r.lesson_date, r.lesson_time, r.program_id, r.studio_id, r.studio_room_id)
             for r in reservations
         }
-        run_hour = self._settings.run_hour
-        run_minute = self._settings.run_minute
+        run_hour = self._settings.auto_booking_hour
+        run_minute = self._settings.auto_booking_minute
+        # 本日の auto_booking ジョブの発火前かどうかで境界が 1 日ずれる。
+        # - 発火前: today+6 日の枠は未実行なので upcoming に含める（「今日 09:00 に予約」表示）
+        # - 発火後: today+6 日の枠は既に処理済みなので除外（今日の予約結果側に現れる）
+        now = datetime.now(tz=self._settings.tz)
+        today_run_at = datetime.combine(
+            today, time(run_hour, run_minute), tzinfo=self._settings.tz
+        )
+        earliest_lesson_date = (
+            today + timedelta(days=5)
+            if now < today_run_at
+            else today + timedelta(days=6)
+        )
         results: list[UpcomingReservation] = []
         for item in recurring_items:
             if item.status is not RecurringStatus.ACTIVE:
                 continue
             base = next_weekday(today, item.day_of_week)
+            # 予約 API の開放範囲のうち、ジョブが実行済みの日は除外する
+            # （発火前なら today+6、発火後なら today+7 以降を残す）。
+            while base <= earliest_lesson_date:
+                base += timedelta(days=7)
             for week in range(4):
                 lesson_date = base + timedelta(weeks=week)
                 key = (
