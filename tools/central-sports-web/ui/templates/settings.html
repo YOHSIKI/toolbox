@@ -1,0 +1,113 @@
+{% extends hx_request|default(false) and "base_empty.html" or "base.html" %}
+{% block title %}設定 — central-sports-web{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+  <div class="section-title">
+    <h1>設定</h1>
+  </div>
+  <div class="settings-hint">
+    保存した値は次回起動時に反映される。
+  </div>
+
+  {% if saved %}
+    <div class="settings-banner settings-banner--ok">
+      <span class="settings-banner-icon">✓</span>
+      <div>保存しました。次回起動時に反映されます。</div>
+    </div>
+  {% endif %}
+  {% if error_message %}
+    <div class="settings-banner settings-banner--ng">
+      <span class="settings-banner-icon">!</span>
+      <div>{{ error_message }}</div>
+    </div>
+  {% endif %}
+
+  {% for section in sections %}
+  <div class="card settings-section">
+    <div class="card-header">
+      <h2>{{ section.title }}</h2>
+      {% if section.description %}
+        <span class="settings-section-desc">{{ section.description }}</span>
+      {% endif %}
+    </div>
+    <div class="card-body-flush">
+      {% for item in section.items %}
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">{{ item.label }}</div>
+            {% if item.note %}
+              <div class="settings-row-note">{{ item.note }}</div>
+            {% endif %}
+          </div>
+          <div class="settings-row-control">
+            {% if item.editable %}
+              <form class="settings-edit-form" method="post" action="/reserve/settings/update">
+                <input type="hidden" name="key" value="{{ item.edit_key }}">
+                {% if item.edit_type == "toggle" %}
+                  <label class="settings-toggle">
+                    <input type="checkbox"
+                           class="settings-toggle-input js-settings-toggle"
+                           {% if item.current_raw == "true" %}checked{% endif %}>
+                    <span class="settings-toggle-track"></span>
+                    <span class="settings-toggle-label">{% if item.current_raw == "true" %}有効{% else %}無効{% endif %}</span>
+                  </label>
+                  <input type="hidden" name="value" value="{{ item.current_raw }}">
+                {% elif item.edit_type == "time" %}
+                  <input class="settings-input settings-input--time" type="time" name="value" value="{{ item.current_raw }}" step="60" required>
+                {% elif item.edit_type == "select" %}
+                  <select class="settings-input settings-input--select" name="value">
+                    {% for opt in item.edit_options %}
+                      <option value="{{ opt }}" {% if opt == item.current_raw %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                  </select>
+                {% elif item.edit_type == "number" %}
+                  <input class="settings-input settings-input--number" type="number" name="value"
+                         value="{{ item.current_raw }}"
+                         {% if item.edit_min is not none %}min="{{ item.edit_min }}"{% endif %}
+                         {% if item.edit_max is not none %}max="{{ item.edit_max }}"{% endif %}
+                         {% if item.edit_step is not none %}step="{{ item.edit_step }}"{% endif %}
+                         required>
+                {% else %}
+                  <input class="settings-input settings-input--text" type="text" name="value" value="{{ item.current_raw }}" required>
+                {% endif %}
+                <button class="btn btn--primary" type="submit">保存</button>
+              </form>
+            {% else %}
+              <div class="settings-readonly">{{ item.value_display }}</div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="settings-secret-note">
+    Basic 認証・Discord Webhook・シークレット配置は secret-manager で管理する。
+  </div>
+</div>
+
+<script>
+  // トグルのチェック状態を hidden input の value ("true"/"false") と表示ラベルに同期する。
+  // 保存ボタン押下時に form が POST され、サーバー側は従来どおり value を読む。
+  (function () {
+    function wire(root) {
+      root.querySelectorAll('.js-settings-toggle').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var form = cb.closest('form');
+          if (!form) return;
+          var hidden = form.querySelector('input[name="value"]');
+          if (hidden) hidden.value = cb.checked ? 'true' : 'false';
+          var label = cb.parentElement.querySelector('.settings-toggle-label');
+          if (label) label.textContent = cb.checked ? '有効' : '無効';
+        });
+      });
+    }
+    wire(document);
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+      wire(evt.detail.target || document);
+    });
+  })();
+</script>
+{% endblock %}

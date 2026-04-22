@@ -37,7 +37,7 @@ tools/central-sports-web/
 │   └── repositories/  # studio / recurring / reservation / history / schedule_cache
 ├── scheduler/
 │   ├── runtime.py     # APScheduler
-│   └── jobs/          # warmup / run_at_nine / monthly_sync / weekly_sync / retention
+│   └── jobs/          # warmup / run_at_nine / cache_refresh / daily_sync / retention
 ├── ui/
 │   ├── templates/     # Jinja2 (base/sidebar/topbar/dashboard/reserve_calendar/reserve_recurring)
 │   └── static/        # styles.css（モック準拠）

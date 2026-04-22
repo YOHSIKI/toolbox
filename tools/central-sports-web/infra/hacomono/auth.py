@@ -26,7 +26,9 @@ from infra.hacomono.masking import register_secret_values
 
 logger = logging.getLogger(__name__)
 
-MAX_CONSECUTIVE_FAILURES = 3
+# 連続認証失敗のロックアウト上限のデフォルト。
+# 実運用値は `config.settings.Settings.max_consecutive_failures` で差し替える。
+DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
 DEVICE_ID_LEN = 40
 _HEX_CHARS = set("0123456789abcdef")
 
@@ -94,6 +96,7 @@ class AuthSession:
     email: str
     password: str
     http: HttpBackend
+    max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES
     lock: threading.RLock = field(default_factory=threading.RLock)
     _consecutive_failures: int = 0
     _locked_out: bool = False
@@ -147,7 +150,7 @@ class AuthSession:
                 for e in (errors or [])
                 if isinstance(e, dict) and e.get("code")
             ]
-            if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            if self._consecutive_failures >= self.max_consecutive_failures:
                 self._locked_out = True
                 raise LockedOut(
                     f"locked out after {self._consecutive_failures} failed sign-ins"

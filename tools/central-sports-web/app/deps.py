@@ -88,10 +88,20 @@ def build_context(settings: Settings) -> AppContext:
             )
         else:
             register_secret_values(email, password)
-            http = HttpBackend(device_id=device_id)
-            auth = AuthSession(email=email, password=password, http=http)
+            http = HttpBackend(
+                device_id=device_id,
+                timeout=settings.reserve_timeout_seconds,
+            )
+            auth = AuthSession(
+                email=email,
+                password=password,
+                http=http,
+                max_consecutive_failures=settings.max_consecutive_failures,
+            )
             client = HacomonoClient(http=http, auth=auth)
-            public_client = PublicMonthlyClient()
+            public_client = PublicMonthlyClient(
+                timeout=settings.public_monthly_timeout_seconds,
+            )
 
             # ローカル import で循環を回避
             from app.adapters.hacomono_gateway import HacomonoGateway
@@ -102,6 +112,8 @@ def build_context(settings: Settings) -> AppContext:
                 dry_run=settings.dry_run,
                 public_client=public_client,
                 db_path=settings.db_file,
+                alias_sim_accept=settings.alias_sim_accept,
+                alias_sim_warn=settings.alias_sim_warn,
             )
             calendar_service = CalendarQueryService(
                 settings.db_file, gateway, settings=settings

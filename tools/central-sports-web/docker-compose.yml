@@ -24,3 +24,9 @@ services:
       - /volume1/toolbox/tools/central-sports-web/data:/app/data
     ports:
       - "${CSW_PORT:-8080}:8080"
+    # Docker 内蔵 DNS (127.0.0.11) が不安定で DNSError を頻発するため、
+    # Google Public DNS / Cloudflare を明示して hacomono / 公開月間 API の
+    # 名前解決を確実にする。
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1

@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_basic_auth
 from app.lifespan import lifespan
-from app.routes import dashboard, debug, health, intents, recurring, reserve, studios, sync
+from app.routes import (
+    dashboard,
+    debug,
+    health,
+    intents,
+    recurring,
+    reserve,
+    studios,
+    sync,
+)
+from app.routes import (
+    settings as settings_route,
+)
 from config.settings import Settings, get_settings
 
 logging.basicConfig(
@@ -37,6 +50,26 @@ def create_app() -> FastAPI:
     static_dir = BASE_DIR / "ui" / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # 全リクエストのサーバー側処理時間を計測してログとレスポンスヘッダに出す。
+    # ブラウザ DevTools でも X-Process-Time-Ms / Server-Timing として確認できる。
+    @app.middleware("http")
+    async def timing_middleware(request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        # healthz はノイズになるのでログ出さない
+        if request.url.path != "/healthz":
+            logger.info(
+                "request %s %s -> %d in %.1fms",
+                request.method,
+                request.url.path + (f"?{request.url.query}" if request.url.query else ""),
+                response.status_code,
+                elapsed_ms,
+            )
+        response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.1f}"
+        response.headers["Server-Timing"] = f"total;dur={elapsed_ms:.1f}"
+        return response
+
     app.include_router(health.router, tags=["health"])
     app.include_router(
         dashboard.router,
@@ -52,6 +85,11 @@ def create_app() -> FastAPI:
         recurring.router,
         dependencies=[Depends(require_basic_auth)],
         tags=["recurring"],
+    )
+    app.include_router(
+        settings_route.router,
+        dependencies=[Depends(require_basic_auth)],
+        tags=["settings"],
     )
     app.include_router(
         studios.router,

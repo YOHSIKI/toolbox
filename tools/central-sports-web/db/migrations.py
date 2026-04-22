@@ -19,6 +19,7 @@ from db.schema import (
     V4_SETUP,
     V5_SETUP,
     V6_SETUP,
+    V7_SETUP,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,9 @@ def run_migrations(db_path: Path) -> None:
                 connection.execute(sql)
         if version < 6:
             for sql in V6_SETUP:
+                connection.execute(sql)
+        if version < 7:
+            for sql in V7_SETUP:
                 connection.execute(sql)
         connection.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",

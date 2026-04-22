@@ -58,15 +58,45 @@ class Settings(BaseSettings):
 
     # スケジューラ
     scheduler_enabled: bool = True
-    warm_up_hour: int = 8
-    warm_up_minute: int = 55
-    run_hour: int = 9
-    run_minute: int = 0
-    misfire_grace_time_seconds: int = 120
+    login_warmup_hour: int = 8
+    login_warmup_minute: int = 55
+    auto_booking_hour: int = 9
+    auto_booking_minute: int = 0
+    # 旧: misfire_grace_time_seconds（削除済み。scheduler 側で固定 60 秒）
+
+    # スケジューラ（以前ハードコードしていた cron を設定化）
+    schedule_refresh_hour: int = 0
+    schedule_refresh_minute: int = 5
+    my_reservations_sync_hour: int = 0
+    my_reservations_sync_minute: int = 0
+    # 履歴クリーンアップは毎日 0 時に固定（保持日数で期限判定するため、
+    # 曜日や時刻をパラメータ化する意味がない）
 
     # カレンダー表示（9:15 など分単位の枠も取りこぼさないよう 9 時から）
-    calendar_start_hour: int = 9
-    calendar_end_hour: int = 21
+    calendar_start_time: int = 9
+    calendar_end_time: int = 21
+
+    # 履歴表示（ダッシュボードの「予約履歴」カードの最大件数）
+    history_display_limit: int = 30
+
+    # プログラム名の一致判定（hacomono_gateway の alias 自動学習しきい値）
+    #   median >= alias_sim_accept           → 通常 upsert
+    #   alias_sim_warn ≤ median < accept     → warning 付き upsert
+    #   median < alias_sim_warn              → skip（誤学習防止）
+    # 値は検証ペア 16 件で clean cut が成立する点に合わせる:
+    #   同一群 min=0.636 / 別物群 max=0.571 / margin=+0.065
+    alias_sim_accept: float = 0.61
+    alias_sim_warn: float = 0.576
+
+    # 外部 API タイムアウト（秒）
+    reserve_timeout_seconds: float = 15.0
+    public_monthly_timeout_seconds: float = 10.0
+
+    # 連続認証失敗のロックアウト上限
+    max_consecutive_failures: int = 3
+
+    # 履歴保持日数（週次 retention ジョブで削除対象）
+    history_keep_days: int = 90
 
     @property
     def tz(self) -> ZoneInfo:

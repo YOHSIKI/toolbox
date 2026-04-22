@@ -29,6 +29,16 @@
           予約
         </a>
       </li>
+      <li>
+        <a class="nav-item {% if active_nav == 'settings' %}is-active{% endif %}" href="{{ url_for('settings') }}"
+           hx-get="{{ url_for('settings') }}" hx-target="#hx-main" hx-swap="innerHTML" hx-push-url="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          設定
+        </a>
+      </li>
     </ul>
   </div>
 
@@ -44,22 +54,54 @@
       {% endif %}
     </div>
   </div>
+
+  {% if settings is defined and settings %}
+  <div class="sidebar-footer">
+    <span class="app-brand">{{ settings.app_name }}</span>
+    <span class="app-version">v{{ settings.version }}</span>
+  </div>
+  {% endif %}
 </aside>
 <script>
 // HTMX 部分更新でサイドバーは差し替わらないため、URL 変化に応じて
 // 現在開いているページに対応する nav-item に is-active を再付与する。
+// /reserve と /reserve/settings のように prefix が重なる場合、最長一致の
+// 1 つだけを active にする（両方 active になる誤表示を防ぐ）。
 (function() {
   function updateActiveNav() {
     var path = window.location.pathname;
-    document.querySelectorAll('.nav .nav-item').forEach(function(a) {
+    var items = document.querySelectorAll('.nav .nav-item');
+    var best = null;
+    var bestLen = -1;
+    items.forEach(function(a) {
       try {
         var linkPath = new URL(a.href).pathname;
-        var isActive = (linkPath === '/') ? (path === '/') : (path === linkPath || path.indexOf(linkPath + '/') === 0);
-        a.classList.toggle('is-active', isActive);
+        var matched = (linkPath === '/')
+          ? (path === '/')
+          : (path === linkPath || path.indexOf(linkPath + '/') === 0);
+        if (matched && linkPath.length > bestLen) {
+          best = a;
+          bestLen = linkPath.length;
+        }
       } catch (e) { /* invalid href: skip */ }
     });
+    items.forEach(function(a) {
+      a.classList.toggle('is-active', a === best);
+    });
+    // topbar は HTMX swap で差し替わらないため、active なメニューのラベルを
+    // そのまま topbar タイトルに反映する。
+    var titleEl = document.querySelector('.topbar-title');
+    if (titleEl && best) {
+      var label = (best.textContent || '').trim().replace(/\s+/g, ' ');
+      if (label) titleEl.textContent = label;
+    }
   }
   document.body.addEventListener('htmx:pushedIntoHistory', updateActiveNav);
+  document.body.addEventListener('htmx:afterSwap', updateActiveNav);
+  document.body.addEventListener('htmx:afterSettle', updateActiveNav);
   window.addEventListener('popstate', updateActiveNav);
+  document.addEventListener('DOMContentLoaded', updateActiveNav);
+  // すでに DOMContentLoaded を過ぎていた場合のフォールバック
+  if (document.readyState !== 'loading') updateActiveNav();
 })();
 </script>

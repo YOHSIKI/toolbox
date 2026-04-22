@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 INITIAL_SCHEMA = [
@@ -274,6 +274,24 @@ V6_SETUP: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_program_aliases_pid ON program_aliases (studio_id, studio_room_id, program_id)",
+]
+
+
+# ------------------------------------------------------------------
+# V7: 設定画面（/reserve/settings）からの編集値を保存する override ストア
+# ------------------------------------------------------------------
+# key: pydantic Settings 上のフィールド名（snake_case）。例: "alias_sim_accept"。
+# value: 文字列。起動時に app_settings_loader で os.environ["CSW_<KEY>"] に
+# 注入され、pydantic が env 経由で Settings を上書きする。
+# 型変換は pydantic 側に任せるため、ここでは常に TEXT で保存する。
+V7_SETUP: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
 ]
 
 

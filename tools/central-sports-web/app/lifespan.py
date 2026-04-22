@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.deps import build_context, close_context
+from app.services.app_settings_loader import apply_db_overrides_to_env
 from config.settings import get_settings
 from db.migrations import run_migrations
 
@@ -17,9 +18,19 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # まず env/デフォルトだけで settings を取得し db_file の場所を確定する。
+    # create_app でも get_settings() が呼ばれているためここで一旦同じ値が返る。
+    bootstrap_settings = get_settings()
+    run_migrations(bootstrap_settings.db_file)
+    logger.info("migrations applied: %s", bootstrap_settings.db_file)
+
+    # DB の app_settings を os.environ に注入し、Settings を再構築する。
+    # 既に create_app で get_settings() が lru_cache に詰まっているので、
+    # cache_clear してから再取得することで override を反映させる。
+    injected = apply_db_overrides_to_env(bootstrap_settings.db_file)
+    logger.info("applied %d overrides from app_settings", injected)
+    get_settings.cache_clear()
     settings = get_settings()
-    run_migrations(settings.db_file)
-    logger.info("migrations applied: %s", settings.db_file)
 
     context = build_context(settings)
     app.state.context = context

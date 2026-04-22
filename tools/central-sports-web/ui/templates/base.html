@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v={{ asset_version|default('0') }}">
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='/img/favicon-32.png') }}">
   <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', path='/img/favicon-192.png') }}">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='/img/favicon-192.png') }}">
