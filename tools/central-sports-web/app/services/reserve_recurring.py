@@ -30,7 +30,13 @@ from app.domain.entities import (
 from app.domain.errors import NotFound
 from app.domain.ports import ReservationGateway
 from config.settings import Settings
-from db.repositories import history_repo, recurring_repo, reservation_repo, studio_repo
+from db.repositories import (
+    history_repo,
+    program_alias_repo,
+    recurring_repo,
+    reservation_repo,
+    studio_repo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,9 +248,14 @@ class RecurringService:
         today: date,
         weeks: int = 4,
     ) -> list[OccurrencePreview]:
-        run_hour = self._settings.run_hour
-        run_minute = self._settings.run_minute
+        run_hour = self._settings.auto_booking_hour
+        run_minute = self._settings.auto_booking_minute
         base = next_weekday(today, item.day_of_week)
+        # 予約 API の開放範囲（today〜today+6）は定期予約ジョブが取りに行っても
+        # 実行タイミング（target_date - 6 日 9:00）が既に過ぎているため無意味。
+        # 表示も配置プレビューも「今週分は対象外」にして、次回以降だけを返す。
+        if base <= today + timedelta(days=6):
+            base += timedelta(days=7)
         studio_ref = StudioRef(item.studio_id, item.studio_room_id)
         # 予約 API の公開範囲は today〜+6 日。それより先の週は公開月間 API で補う。
         open_until = today + timedelta(days=6)
@@ -362,21 +373,17 @@ class RecurringService:
 
     # --- 実行 -----------------------------------------------------
 
-    def execute_all_for_today(
+    def list_targets_for_date(
         self,
         *,
         today: date,
         target_date: date | None = None,
-        source_category: HistoryCategory = HistoryCategory.AUTOMATION,
-    ) -> list[tuple[RecurringReservation, RecurringRunResult]]:
-        """本日 9:00 に実行すべきアクティブ定期予約をまとめて実行する。
+    ) -> tuple[date, list[RecurringReservation]]:
+        """9:00 実行の対象日と、その曜日に該当するアクティブ定期予約を返す。
 
-        ``target_date`` が指定された場合は、その日付に該当する曜日の定期予約のみを
-        実行する（= ``target_date`` が新規解放された日に絞る用途）。未指定時は
-        ``today + 6`` 日（= schedule_open_days=7 仕様での新規解放日）を target として拾う。
-        戻り値は (対象定期予約, 実行結果) のタプル列。呼び出し側が通知メッセージを
-        組み立てるために定期予約のメタ情報（program_name, seat_preferences 等）を
-        必要とするため、結果だけでなく item も返す。
+        ``target_date`` が未指定なら ``today + 6`` 日（= schedule_open_days=7 仕様での
+        新規解放日）を採用する。並列実行したい呼び出し元はこの結果を使って個別に
+        ``execute_one_for_date`` を呼ぶ。
         """
 
         resolved_target = (
@@ -384,15 +391,50 @@ class RecurringService:
         )
         items = self.list_active()
         targets = [i for i in items if i.day_of_week == resolved_target.weekday()]
+        return resolved_target, targets
+
+    def execute_all_for_today(
+        self,
+        *,
+        today: date,
+        target_date: date | None = None,
+        source_category: HistoryCategory = HistoryCategory.AUTOMATION,
+    ) -> list[tuple[RecurringReservation, RecurringRunResult]]:
+        """本日 9:00 に実行すべきアクティブ定期予約をまとめて実行する（直列）。
+
+        並列実行したい呼び出し元は ``list_targets_for_date`` + ``execute_one_for_date``
+        を使う。戻り値は (対象定期予約, 実行結果) のタプル列。呼び出し側が通知
+        メッセージを組み立てるために定期予約のメタ情報（program_name,
+        seat_preferences 等）を必要とするため、結果だけでなく item も返す。
+        """
+
+        resolved_target, targets = self.list_targets_for_date(
+            today=today, target_date=target_date
+        )
         results: list[tuple[RecurringReservation, RecurringRunResult]] = []
         for item in targets:
-            result = self.execute_one(
-                item.id,
+            result = self.execute_one_for_date(
+                item,
                 target_date=resolved_target,
                 source_category=source_category,
             )
             results.append((item, result))
         return results
+
+    def execute_one_for_date(
+        self,
+        item: RecurringReservation,
+        *,
+        target_date: date,
+        source_category: HistoryCategory = HistoryCategory.AUTOMATION,
+    ) -> RecurringRunResult:
+        """単一の定期予約を指定日で実行する（並列化ポイント）。"""
+
+        return self.execute_one(
+            item.id,
+            target_date=target_date,
+            source_category=source_category,
+        )
 
     def execute_one(
         self,
@@ -621,9 +663,26 @@ class RecurringService:
         for lsn in same_day:
             if lsn.start_time == item.start_time and lsn.program_id == item.program_id:
                 return lsn
-        # program_id だけ一致（時間変更のケース）
+        # item.program_id が progcd（公開月間 API 由来）だった場合の alias 解決。
+        alias_pid: str | None = None
+        try:
+            alias_pid = program_alias_repo.resolve_reserve_pid(
+                self._db_path,
+                progcd=item.program_id,
+                studio_id=item.studio_id,
+                studio_room_id=item.studio_room_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recurring: alias resolve failed: %s", exc)
+        if alias_pid:
+            for lsn in same_day:
+                if lsn.start_time == item.start_time and lsn.program_id == alias_pid:
+                    return lsn
+        # program_id だけ一致（時間変更のケース／alias 一致）
         for lsn in same_day:
-            if lsn.program_id == item.program_id:
+            if lsn.program_id == item.program_id or (
+                alias_pid is not None and lsn.program_id == alias_pid
+            ):
                 return lsn
         # 公開月間 API 経由では program_id の体系が異なる可能性があるため、
         # 時刻 + プログラム名でのフォールバックを用意する（instructor 補完目的）

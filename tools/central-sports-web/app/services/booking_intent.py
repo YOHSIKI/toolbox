@@ -29,7 +29,12 @@ from app.domain.entities import (
 from app.domain.errors import NotFound
 from app.domain.ports import ReservationGateway
 from config.settings import Settings
-from db.repositories import history_repo, intent_repo, reservation_repo
+from db.repositories import (
+    history_repo,
+    intent_repo,
+    program_alias_repo,
+    reservation_repo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +73,7 @@ class BookingIntentService:
 
         return datetime.combine(
             lesson_date - timedelta(days=6),
-            time(self._settings.run_hour, self._settings.run_minute),
+            time(self._settings.auto_booking_hour, self._settings.auto_booking_minute),
         )
 
     def create(
@@ -137,26 +142,44 @@ class BookingIntentService:
         intent.seat_preferences = list(seat_preferences)
         return intent
 
+    def list_runnable(
+        self,
+        *,
+        today: date,
+        target_date: date | None = None,
+    ) -> list[BookingIntent]:
+        """本日までに開放された（予約すべき）intent の一覧を返す。
+
+        ``target_date`` が指定された場合は ``intent.lesson_date`` が一致するものだけ
+        返す。9:00 ジョブから呼ぶ際に「その日新規解放された日」だけに絞るためのフィルタ。
+        """
+
+        runnable = intent_repo.list_runnable_on(self._db_path, today)
+        if target_date is not None:
+            runnable = [i for i in runnable if i.lesson_date == target_date]
+        return runnable
+
     def execute_due(
         self,
         *,
         today: date,
         target_date: date | None = None,
     ) -> list[IntentRunResult]:
-        """本日までに開放された（予約すべき）intent をすべて実行。
+        """本日までに開放された（予約すべき）intent をすべて実行（直列）。
 
-        ``target_date`` が指定された場合は ``intent.lesson_date`` が一致するものだけ
-        実行する。9:00 ジョブから呼ぶ際に「その日新規解放された日」だけに絞るための
-        フィルタ。未指定時は従来通り全件実行する（互換性維持）。
+        並列実行したい呼び出し元は ``list_runnable`` + ``execute_one`` を使う。
         """
 
-        runnable = intent_repo.list_runnable_on(self._db_path, today)
-        if target_date is not None:
-            runnable = [i for i in runnable if i.lesson_date == target_date]
+        runnable = self.list_runnable(today=today, target_date=target_date)
         results: list[IntentRunResult] = []
         for intent in runnable:
-            results.append(self._execute_one(intent))
+            results.append(self.execute_one(intent))
         return results
+
+    def execute_one(self, intent: BookingIntent) -> IntentRunResult:
+        """単一 intent を実行する（並列化ポイント）。"""
+
+        return self._execute_one(intent)
 
     # --- 内部 -----------------------------------------------------
 
@@ -283,12 +306,36 @@ class BookingIntentService:
             logger.warning("intent: fetch_week failed: %s", exc)
             return None
         same_day = [lsn for lsn in lessons if lsn.lesson_date == intent.lesson_date]
-        # 時刻＋program_id 完全一致を優先、次に program_id のみ
+        # 1. 時刻＋program_id 完全一致を最優先
         for lsn in same_day:
             if lsn.program_id == intent.program_id and lsn.start_time == intent.lesson_time:
                 return lsn
+        # 2. intent.program_id が progcd（公開月間 API 由来）だった場合の alias 解決。
+        #    学習済みの progcd → reserve 数値 program_id に変換して再試行。
+        alias_pid: str | None = None
+        try:
+            alias_pid = program_alias_repo.resolve_reserve_pid(
+                self._db_path,
+                progcd=intent.program_id,
+                studio_id=intent.studio_id,
+                studio_room_id=intent.studio_room_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("intent: alias resolve failed: %s", exc)
+        if alias_pid:
+            for lsn in same_day:
+                if lsn.start_time == intent.lesson_time and lsn.program_id == alias_pid:
+                    return lsn
+        # 3. program_id のみ一致（時間変更のケース／alias 一致）
         for lsn in same_day:
-            if lsn.program_id == intent.program_id:
+            if lsn.program_id == intent.program_id or (
+                alias_pid is not None and lsn.program_id == alias_pid
+            ):
+                return lsn
+        # 4. 最終 fallback: 時刻 + program_name 一致。progcd/program_id が両側で
+        #    取れない週替わりサブプログラム等で表示名を頼りに拾う。
+        for lsn in same_day:
+            if lsn.start_time == intent.lesson_time and lsn.program_name == intent.program_name:
                 return lsn
         return None
 

@@ -1,12 +1,12 @@
-"""2 分ごとに reserve API 窓を fetch してキャッシュを温め直すジョブ。
+"""1 日 1 回（00:05）reserve API 窓と公開月間 API を fetch してキャッシュを温め直すジョブ。
 
-`HacomonoGateway` の `_cache_ttl` は 5 分に設定されている。
+`HacomonoGateway` の `_cache_ttl` は 24 時間に設定されている。
 ブラウザからのアクセス時点で cache が切れていると体感で 300-500ms の
-空白が発生するため、バックグラウンドで定期的に fetch_week を呼び出して
-常にキャッシュがウォームな状態を維持する。
+空白が発生するため、深夜の定時に fetch_week / fetch_monthly_public を
+呼び出して常にキャッシュがウォームな状態を維持する。
 
-このジョブは軽量（3 秒以内で終わる reserve API 1 コール）なので、
-scheduler の他のジョブと衝突してもコストはほぼ無視できる。
+朝 9:00 の新規解放分は `auto_booking`（run_at_nine_job）が finally で
+このジョブを呼ぶので、日中の時間割更新はそちらに任せる。
 """
 
 from __future__ import annotations

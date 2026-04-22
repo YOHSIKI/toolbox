@@ -10,10 +10,12 @@ from db.repositories import history_repo
 
 logger = logging.getLogger(__name__)
 
-HISTORY_KEEP_DAYS = 90
-
 
 def retention_job(context: AppContext) -> None:
-    cutoff = datetime.now() - timedelta(days=HISTORY_KEEP_DAYS)
+    keep_days = context.settings.history_keep_days
+    cutoff = datetime.now() - timedelta(days=keep_days)
     deleted = history_repo.purge_older_than(context.db_path, cutoff)
-    logger.info("retention: purged %d history rows older than %s", deleted, cutoff.date())
+    logger.info(
+        "retention: purged %d history rows older than %s (keep=%d days)",
+        deleted, cutoff.date(), keep_days,
+    )
