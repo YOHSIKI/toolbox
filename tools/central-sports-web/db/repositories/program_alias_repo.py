@@ -82,4 +82,44 @@ def list_aliases(
     }
 
 
-__all__ = ["upsert_alias", "list_aliases"]
+def resolve_reserve_pid(
+    db_path: Path,
+    *,
+    progcd: str,
+    studio_id: int | None = None,
+    studio_room_id: int | None = None,
+) -> str | None:
+    """progcd (公開月間 API の内部 ID) から reserve API 側の program_id を引く。
+
+    店舗が絞れる場合は (studio_id, studio_room_id, progcd) で厳密検索、
+    未指定時は全店舗から同じ progcd を探す（同一 progcd は全店で同じ program_id に
+    なる前提）。alias が未学習・program_id が NULL の場合は ``None`` を返す。
+    9:00 予約実行時、intent.program_id が progcd のまま保存されているケースの
+    fallback lookup から呼ばれる。
+    """
+
+    with read_connection(db_path) as con:
+        if studio_id is not None and studio_room_id is not None:
+            row = con.execute(
+                """
+                SELECT program_id FROM program_aliases
+                WHERE studio_id = ? AND studio_room_id = ? AND progcd = ?
+                """,
+                (int(studio_id), int(studio_room_id), str(progcd)),
+            ).fetchone()
+        else:
+            row = con.execute(
+                """
+                SELECT program_id FROM program_aliases
+                WHERE progcd = ? AND program_id IS NOT NULL
+                LIMIT 1
+                """,
+                (str(progcd),),
+            ).fetchone()
+    if row is None:
+        return None
+    pid = row["program_id"]
+    return str(pid) if pid is not None else None
+
+
+__all__ = ["upsert_alias", "list_aliases", "resolve_reserve_pid"]

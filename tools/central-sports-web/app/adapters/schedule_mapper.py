@@ -195,6 +195,24 @@ def map_weekly_schedule(
         )
         lessons.append(lesson)
 
+    # hacomono schedule API は同一レッスンを複数 item で返すケースがある
+    # （通常枠 + 体験枠 等）。(date, time, program_id, space_id) キーで dedupe し、
+    # 最初に現れた 1 件のみを残す。UI での重複表示と、予約ロジックでの誤マッチを防ぐ。
+    seen: set[tuple] = set()
+    deduped: list[Lesson] = []
+    for lsn in lessons:
+        key = (
+            lsn.lesson_date,
+            lsn.start_time,
+            lsn.program_id,
+            lsn.studio_room_space_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(lsn)
+    lessons = deduped
+
     lessons.sort(key=lambda lsn: (lsn.lesson_date, lsn.start_time))
     return lessons
 

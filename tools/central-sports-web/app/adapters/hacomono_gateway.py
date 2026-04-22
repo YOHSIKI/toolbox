@@ -31,6 +31,7 @@ from app.domain.entities import (
     SeatPosition,
     StudioRef,
 )
+from app.utils.program_similarity import similarity_ensemble
 from infra.hacomono.auth import AuthSession
 from infra.hacomono.client import HacomonoClient
 from infra.hacomono.errors import (
@@ -69,6 +70,26 @@ logger = logging.getLogger(__name__)
 _NAME_NOISE_RE = _re.compile(r"[\s/／・、,.。．\-－_]+")
 
 
+# --- alias 自動学習の類似度ゲート閾値 ------------------------------------
+#
+# 旧 alias と新観測名の中央値類似度で判定する。hacomono 側でプログラムが
+# 差し替えられた時の誤学習を防ぐフェイルセーフ。
+#
+#   median >= alias_sim_accept           → 通常 upsert（表記揺れとみなす）
+#   alias_sim_warn ≤ median < accept     → warning ログを出して upsert
+#   median < alias_sim_warn              → error ログを出してスキップ
+#
+# 閾値の実体は `config.settings.Settings.alias_sim_accept` /
+# `alias_sim_warn` に統合された。ゲートウェイは `__init__` で値を受け取る。
+# dashboard_query の program_changes 通知抑制でも同じ settings 値を使う
+# （single source of truth）。
+#
+# Issue #1 の 16 ペア実測（2026-04-20, 5 指標に拡張）:
+#   同一群 median min = 0.452（AA747 系プレフィクスペア）
+#   別物群 median max = 0.545（フィールヨガ / パワーヨガ）
+# デフォルトの accept=0.60 / warn=0.40 は上記の下限を参考にしたキャリブ値。
+
+
 def _normalize_program_name(name: str | None) -> str:
     """プログラム名をマッチング用に正規化する。
 
@@ -96,12 +117,16 @@ class HacomonoGateway:
         dry_run: bool,
         public_client: PublicMonthlyClient | None = None,
         db_path: Path | None = None,
+        alias_sim_accept: float = 0.60,
+        alias_sim_warn: float = 0.40,
     ) -> None:
         self._client = client
         self._auth = auth
         self._dry_run = dry_run
         self._public_client = public_client
         self._db_path = db_path
+        self._alias_sim_accept = alias_sim_accept
+        self._alias_sim_warn = alias_sim_warn
         # schedule API から得た studio_room_space_id → (SeatPosition[], grid_cols, grid_rows) の
         # インメモリキャッシュ。起動時に DB から復元され、fetch_week で更新される。
         # fetch_seat_map / 公開月間 API 補完の両方から参照される。
@@ -121,10 +146,11 @@ class HacomonoGateway:
         # 元に学習する。未観測の公開月間 lesson の表記置換にも使う。
         self._program_alias: dict[tuple[int, int], dict[str, dict]] = {}
         # 外部 API 呼び出しのキャッシュ。
-        # TTL 5 分: 画面切替のたびに reserve API を叩き直すのは体感で重いため、
-        # 鮮度はバックグラウンドの warm-up ジョブ（2 分ごと）と手動同期ボタン時の
-        # invalidate で担保する。画面からは常時 cache hit を目指す。
-        self._cache_ttl = 300.0
+        # TTL 24 時間: 時間割の更新は深夜 0:05 の cache_refresh_job と朝 9:00 の
+        # run_at_nine_job（予約実行後）の 2 回だけと割り切る運用。日中に TTL 切れで
+        # 外部 API を叩くことを避け、画面切替のたびの 500ms〜1s の cold 遅延を無くす。
+        # 実際の鮮度は invalidate_caches() の明示呼び出しで担保。
+        self._cache_ttl = 86400.0
         self._week_cache: dict[
             tuple[int, int, str, int], tuple[float, list[Lesson]]
         ] = {}
@@ -557,6 +583,48 @@ class HacomonoGateway:
                                     and existing.get("program_id") != reserve_pid_str
                                 )
                             ):
+                                # 類似度ゲート: 既存 alias の旧名と新観測名が
+                                # 大きく食い違う場合、hacomono 側でプログラム
+                                # 差し替えが起きた可能性がある。upsert を
+                                # 弾いて誤学習を防ぐ。初回学習（existing is
+                                # None）は比較対象が無いのでスルー。
+                                skip_due_to_mismatch = False
+                                if existing is not None:
+                                    old_name = existing.get("program_name") or ""
+                                    if old_name and old_name != reserve_name:
+                                        scores = similarity_ensemble(
+                                            reserve_name, old_name
+                                        )
+                                        median = scores["median"]
+                                        log_line = (
+                                            "alias_gate progcd=%s new_name=%r "
+                                            "old_name=%r scores="
+                                            "{lev:%.2f, jw:%.2f, jac:%.2f, "
+                                            "partial:%.2f, token:%.2f} "
+                                            "median=%.2f decision=%s"
+                                        )
+                                        args = (
+                                            progcd,
+                                            reserve_name,
+                                            old_name,
+                                            scores["levenshtein"],
+                                            scores["jaro_winkler"],
+                                            scores["jaccard3"],
+                                            scores["partial_ratio"],
+                                            scores["token_set_ratio"],
+                                            median,
+                                        )
+                                        if median >= self._alias_sim_accept:
+                                            logger.info(log_line, *args, "upsert")
+                                        elif median >= self._alias_sim_warn:
+                                            logger.warning(
+                                                log_line, *args, "upsert_warning"
+                                            )
+                                        else:
+                                            logger.error(log_line, *args, "skip")
+                                            skip_due_to_mismatch = True
+                                if skip_due_to_mismatch:
+                                    continue
                                 alias_cache[progcd] = {
                                     "program_id": reserve_pid_str
                                     or (existing.get("program_id") if existing else None),
