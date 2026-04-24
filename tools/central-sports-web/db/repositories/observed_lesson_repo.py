@@ -138,4 +138,61 @@ def list_by_range(
     return result
 
 
-__all__ = ["upsert_many", "list_by_range"]
+def list_by_date(
+    db_path: Path,
+    *,
+    studio_id: int,
+    studio_room_id: int,
+    lesson_date: date,
+) -> list[dict]:
+    """指定日の観測済み lesson を start_time 昇順の list で返す。
+
+    `list_by_range` は `(date, time)` キーの dict を返し同じ (date, time)
+    で複数 program_id を畳み込んでしまうが、こちらは観測行をそのまま全件
+    返す。仮スケジュール生成（`calendar_query._build_tentative_lessons`）
+    が過去日のレッスン一覧を取り出すために使う。
+
+    Returns: list[dict] — 各要素に以下のキーを含む:
+      - `start_time`
+      - `program_id`, `program_name`
+      - `instructor_id`, `instructor_name`
+      - `studio_room_space_id`
+      - `capacity`
+      - `observed_at`
+    """
+
+    with read_connection(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT start_time, program_id, program_name,
+                   instructor_id, instructor_name, studio_room_space_id,
+                   capacity, observed_at
+            FROM observed_lessons
+            WHERE studio_id = ?
+              AND studio_room_id = ?
+              AND lesson_date = ?
+            ORDER BY start_time ASC
+            """,
+            (
+                int(studio_id),
+                int(studio_room_id),
+                lesson_date.isoformat(),
+            ),
+        ).fetchall()
+
+    return [
+        {
+            "start_time": str(row["start_time"] or ""),
+            "program_id": row["program_id"],
+            "program_name": row["program_name"],
+            "instructor_id": row["instructor_id"],
+            "instructor_name": row["instructor_name"],
+            "studio_room_space_id": row["studio_room_space_id"],
+            "capacity": row["capacity"],
+            "observed_at": row["observed_at"],
+        }
+        for row in rows
+    ]
+
+
+__all__ = ["upsert_many", "list_by_range", "list_by_date"]

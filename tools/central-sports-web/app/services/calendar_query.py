@@ -16,16 +16,21 @@ from app.adapters.public_monthly_mapper import collect_closed_dates
 from app.domain.entities import (
     CalendarCell,
     CalendarWeek,
+    IntentStatus,
     Lesson,
     LessonState,
     RecurringStatus,
     SeatMap,
     Studio,
 )
-from app.domain.entities import IntentStatus
 from app.domain.ports import ReservationGateway
 from config.settings import Settings
-from db.repositories import intent_repo, recurring_repo, reservation_repo
+from db.repositories import (
+    intent_repo,
+    observed_lesson_repo,
+    recurring_repo,
+    reservation_repo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +77,8 @@ class CalendarQueryService:
             # 一致するなら TARGET（青）表示にする。auto_booking が 9:00 に
             # 拾うため、ユーザーに「自動で予約される枠」だと知らせる。
             self._annotate_recurring_state(lessons, today=today)
-            # 今週画面でも金曜定休日・祝日特別日を「休館」として表示したい。
-            # 公開月間 API 経由で closed_dates を取得（gateway キャッシュがあるので軽い）。
+            # 確定休館（datekb=1 = 店舗定休）のみ取得。祝日特別日（datekb=3）は
+            # 仮スケジュール側で扱うためここでは除外する。
             closed_days = self._fetch_closed_days(studio, week_start)
             # reserve API は朝 9:00 に「今日+6 日」を新規解放する。9:00 前の
             # 時点では末尾日（今日+6 日）のレッスンがまだ取得できず、カレンダーの
@@ -98,6 +103,14 @@ class CalendarQueryService:
                         "dates=%s fill_lessons=%d",
                         sorted(missing_dates), len(fill),
                     )
+            # 公開月間 API からも取れない日（祝日 datekb=3、翌月未配信の境界週
+                # で月を跨いで一部だけ取れない等）は、過去の observed_lessons を
+                # 元に仮スケジュールで埋める。
+            tentative = self._fill_tentative(
+                studio, lessons, week_start, today, set(closed_days)
+            )
+            if tentative:
+                lessons.extend(tentative)
         else:
             # 未開放週は公開月間 API から取得する。公開月間 API には座席レイアウト
             # 情報が含まれないため、先に reserve API（今日〜+6 日）を叩いて
@@ -115,6 +128,13 @@ class CalendarQueryService:
             # out_of_range でも recurring が当たる lesson は TARGET 化する。
             # reserve API 経路と違い、reservation / FULL / UNRESERVABLE の判定材料はない。
             self._annotate_recurring_state(lessons, today=today)
+            # 翌月分が公開月間 API でまだ配信されていない場合、ここで lessons が
+            # 空になる。仮スケジュールで観測済みの過去週から埋める。
+            tentative = self._fill_tentative(
+                studio, lessons, week_start, today, set(closed_days)
+            )
+            if tentative:
+                lessons.extend(tentative)
         self._annotate_intent_state(lessons)
         logger.info(
             "build_week studio=%s week=%s out_of_range=%s lessons=%d",
@@ -203,7 +223,10 @@ class CalendarQueryService:
         return results
 
     def _fetch_closed_days(self, studio: Studio, week_start: date) -> list[date]:
-        """公開月間 API の pims_closed から、週内の休館日を抽出する。
+        """店舗定休日（datekb=1）のみを公開月間 API から取得する。
+
+        祝日特別日（datekb=3）や翌月未配信日は「月間データに載らない日」として
+        後段の仮スケジュール補完側で扱うため、ここでは対象外とする。
 
         gateway にキャッシュ付き `fetch_closed_days` があるのでそれを使う。
         毎リクエストで公開月間 API を叩かないよう、月単位で cache する。
@@ -227,6 +250,7 @@ class CalendarQueryService:
                     sisetcd=studio.sisetcd,
                     year=year,
                     month=month,
+                    kind="fixed",
                 )
                 all_closed.update(month_closed)
             except Exception as exc:  # noqa: BLE001
@@ -234,6 +258,113 @@ class CalendarQueryService:
                     "fetch_closed_days failed year=%d month=%d: %s", year, month, exc
                 )
         return sorted(d for d in all_closed if week_start <= d <= week_end)
+
+    def _fill_tentative(
+        self,
+        studio: Studio,
+        lessons: list[Lesson],
+        week_start: date,
+        today: date,
+        fixed_closed: set[date],
+    ) -> list[Lesson]:
+        """週内で実データの取れない日を仮スケジュールで補完する。
+
+        `fixed_closed`（datekb=1 の確定休館）と既に埋まっている日を除いた
+        残りについて、1/2/3 週前の observed_lessons から lesson を借りる。
+        """
+
+        week_dates = {week_start + timedelta(days=i) for i in range(7)}
+        covered = {lesson.lesson_date for lesson in lessons}
+        targets = week_dates - covered - fixed_closed
+        targets = {d for d in targets if d >= today}
+        if not targets:
+            return []
+        tentative = self._build_tentative_lessons(studio, targets, today=today)
+        if tentative:
+            self._annotate_recurring_state(tentative, today=today)
+        return tentative
+
+    def _build_tentative_lessons(
+        self,
+        studio: Studio,
+        target_dates: set[date],
+        *,
+        today: date,
+    ) -> list[Lesson]:
+        """target_dates の各日について、過去 1〜3 週前の観測レッスンから
+        仮 lesson を組み立てる。
+
+        候補週を新しい順（-7d → -14d → -21d）に評価し、observed_lessons に
+        行がある最初の週を採用する。3 週前まで何も無ければその日はスキップ。
+
+        生成 lesson は `studio_lesson_id=0`, `is_reservable=False`,
+        `release_pending=True`, `tentative_source=<候補日>` でマークする。
+        `release_pending` を立てることで UI の Intent 登録フォームが自動的に
+        表示される。
+        """
+
+        results: list[Lesson] = []
+        for target in sorted(target_dates):
+            if target < today:
+                continue
+            rows: list[dict] = []
+            source_date: date | None = None
+            for weeks_back in (1, 2, 3):
+                candidate = target - timedelta(weeks=weeks_back)
+                try:
+                    rows = observed_lesson_repo.list_by_date(
+                        self._db_path,
+                        studio_id=studio.studio_id,
+                        studio_room_id=studio.studio_room_id,
+                        lesson_date=candidate,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "tentative: list_by_date failed date=%s: %s",
+                        candidate, exc,
+                    )
+                    rows = []
+                if rows:
+                    source_date = candidate
+                    break
+            if source_date is None or not rows:
+                continue
+            for row in rows:
+                start_time = str(row.get("start_time") or "")
+                program_id = str(row.get("program_id") or "")
+                if not start_time:
+                    continue
+                program_name = str(
+                    row.get("program_name") or program_id or "レッスン"
+                )
+                lesson = Lesson(
+                    studio_lesson_id=0,
+                    studio_id=studio.studio_id,
+                    studio_room_id=studio.studio_room_id,
+                    lesson_date=target,
+                    start_time=start_time,
+                    end_time=None,
+                    program_id=program_id,
+                    program_name=program_name,
+                    instructor_id=row.get("instructor_id"),
+                    instructor_name=row.get("instructor_name"),
+                    capacity=row.get("capacity"),
+                    remaining_seats=None,
+                    studio_room_space_id=row.get("studio_room_space_id"),
+                    space_layout_name=None,
+                    is_reservable=False,
+                    reservable_from=None,
+                    reservable_to=None,
+                    state=LessonState.AVAILABLE,
+                    release_pending=True,
+                    tentative_source=source_date,
+                )
+                results.append(lesson)
+            logger.info(
+                "tentative filled: target=%s source=%s lessons=%d",
+                target, source_date, len(rows),
+            )
+        return results
 
     # --- 内部 -------------------------------------------------------
 

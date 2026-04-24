@@ -1152,6 +1152,30 @@ h4 { font-size: 13px; }
 }
 .lesson--pending-intent .lesson-name { color: #b45309; }
 
+/* 仮スケジュール: 過去の観測値から推定したレッスン。薄いグレーで実データと区別する。
+   他状態（pending-intent / target / 空きあり）と併用するので、背景や枠線を弱めに重ねる。 */
+.lesson--tentative {
+  background: var(--surface-sunken);
+  border-color: var(--border);
+  border-left: 3px dashed var(--text-faint);
+  opacity: 0.88;
+}
+.lesson--tentative .lesson-name { color: var(--text-muted); }
+.lesson-badge-tentative {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  letter-spacing: 0.04em;
+}
+
 .lesson-star {
   position: absolute;
   top: 4px;
@@ -1473,6 +1497,7 @@ h4 { font-size: 13px; }
 .legend-swatch--reserved       { background: var(--success-soft);  border: 1px solid #bbf7d0; border-left: 3px solid var(--success); }
 .legend-swatch--pending-intent { background: #fefce8;             border: 1px solid #fde68a; border-left: 3px dashed #b45309; }
 .legend-swatch--target         { background: #eef4ff;             border: 1px solid #c7dbff; border-left: 3px solid #1d4ed8; }
+.legend-swatch--tentative      { background: var(--surface-sunken); border: 1px dashed var(--border); border-left: 3px dashed var(--text-faint); }
 .legend-swatch--full           { background: var(--surface-sunken); border: 1px solid var(--border); }
 
 /* ========================================

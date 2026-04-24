@@ -160,8 +160,9 @@ class HacomonoGateway:
         ] = {}
         # 公開月間 API から取得した休館日（date の集合）を月単位でキャッシュ。
         # 全画面で毎リクエスト使うため、cache miss すると体感 300ms+ 遅い。
+        # キーに kind を含めて「定休日のみ」「祝日特別日のみ」を区別する。
         self._closed_days_cache: dict[
-            tuple[str, str, int, int], tuple[float, set[date]]
+            tuple[str, str, int, int, str], tuple[float, set[date]]
         ] = {}
         # DB から学習結果を復元（コンテナ再起動でも maps は失われない）
         self._load_persisted()
@@ -188,17 +189,23 @@ class HacomonoGateway:
         sisetcd: str,
         year: int,
         month: int,
+        kind: str = "fixed",
     ) -> set[date]:
         """指定月の休館日集合を公開月間 API から取得する（キャッシュ付き）。
 
         calendar_query から呼ばれ、毎リクエストで API を叩かないようにする。
+
+        `kind` は `collect_closed_dates` にそのまま渡す:
+          - `"fixed"` （既定）→ datekb=1 のみ（確定休館）
+          - `"special"` → datekb=3 のみ（祝日特別日）
+          - `"all"` → 従来どおり全て
         """
 
         from app.adapters.public_monthly_mapper import collect_closed_dates
 
         if self._public_client is None:
             return set()
-        cache_key = (club_code, sisetcd, year, month)
+        cache_key = (club_code, sisetcd, year, month, kind)
         now = _time.monotonic()
         cached = self._closed_days_cache.get(cache_key)
         if cached is not None and (now - cached[0]) < self._cache_ttl:
@@ -209,11 +216,14 @@ class HacomonoGateway:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "fetch_closed_days failed club=%s ym=%04d%02d: %s",
-                club_code, year, month, exc,
+                "fetch_closed_days failed club=%s ym=%04d%02d kind=%s: %s",
+                club_code, year, month, kind, exc,
             )
             return set()
-        dates = collect_closed_dates(payload, year=year, month=month)
+        mapper_kind = kind if kind in ("fixed", "special") else None
+        dates = collect_closed_dates(
+            payload, year=year, month=month, kind=mapper_kind
+        )
         self._closed_days_cache[cache_key] = (now, dates)
         return dates
 

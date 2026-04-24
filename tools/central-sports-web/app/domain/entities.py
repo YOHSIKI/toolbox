@@ -125,6 +125,11 @@ class Lesson:
     # 公開月間 API から補完した lesson はこのフラグを立てる。UI 側では未開放週
     # と同様に「予約予定（intent）」の登録フォームを出す。
     release_pending: bool = False
+    # 公開月間 API にも載らない日（祝日 datekb=3 / 翌月未配信 等）を、過去の
+    # observed_lessons から借りて仮表示した lesson はこのフィールドに出典日を入れる。
+    # None なら実データ。UI では「仮」バッジで区別し、release_pending=True と併用して
+    # Intent 登録フォームに流す。
+    tentative_source: date | None = None
 
     @property
     def is_full(self) -> bool:
