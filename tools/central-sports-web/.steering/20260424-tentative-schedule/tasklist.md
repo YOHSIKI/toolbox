@@ -101,6 +101,22 @@
 - [ ] 凡例に「仮スケジュール」が追加されている
 - [ ] 過去の week に戻って、`lesson_date < today` の日には仮スケジュールが出ていないことを確認
 
+## フェーズ 9.5: 3LLM レビュー反映
+
+- [ ] `calendar_query.py:15` 未使用 import `collect_closed_dates` を削除
+- [ ] `calendar_query.py` 仮スケジュール補完のコメントインデントを修正
+- [ ] `_fill_tentative` の呼び出しを reserve / out_of_range の両経路から外に出し 1 箇所に統合
+- [ ] `_fetch_closed_days` の返却を `all - special` に変更し、datekb=2 等の未知値も誤って仮対象にしないようにする
+- [ ] `observed_lesson_repo.list_by_dates` を新設し、複数日を 1 クエリで取得（N+1 解消）
+- [ ] `_build_tentative_lessons` を `list_by_dates` ベースに書き換え、target × 3 週分を最大 1 クエリに
+- [ ] 仮スケジュール件数の INFO ログを実際に append した件数に合わせる
+- [ ] `list_by_date` / `list_by_dates` の内部例外はリポジトリ側で握って空返却（警告ログ）
+- [ ] テスト追加: `fixed_closed` の日は仮スケジュールを作らない
+- [ ] テスト追加: 既に lessons で埋まっている日は仮で上書きしない（`_fill_tentative` 経由）
+- [ ] テスト追加: 複数 target_dates のうち一部だけ観測あり、のパターン
+- [ ] テスト追加: `target == today` は仮スケジュール対象になる（境界値）
+- [ ] ruff check 再実行、pytest 再実行
+
 ## フェーズ 10: 振り返り
 
 - [ ] 計画と実績の差分を振り返り欄に記録

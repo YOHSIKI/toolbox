@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
-from app.adapters.public_monthly_mapper import collect_closed_dates
 from app.domain.entities import (
     CalendarCell,
     CalendarWeek,
@@ -68,8 +67,10 @@ class CalendarQueryService:
         # 予約 API の公開範囲（今日〜+6 日）内は reserve API、範囲外は公開月間 API
         open_until = today + timedelta(days=6)
         out_of_range = week_start > open_until
-        closed_days: list[date] = []
         lessons: list[Lesson] = []
+        # 確定休館（datekb=1）+ 仕様未知の datekb=2 等。datekb=3（祝日特別日）
+        # だけは「月間データには無いが仮スケジュールで埋める対象」として除外する。
+        closed_days = self._fetch_closed_days(studio, week_start)
         if not out_of_range:
             lessons = self._gateway.fetch_week(studio.ref, week_start, days=7)
             self._annotate_reserved_state(lessons, today=today)
@@ -77,9 +78,6 @@ class CalendarQueryService:
             # 一致するなら TARGET（青）表示にする。auto_booking が 9:00 に
             # 拾うため、ユーザーに「自動で予約される枠」だと知らせる。
             self._annotate_recurring_state(lessons, today=today)
-            # 確定休館（datekb=1 = 店舗定休）のみ取得。祝日特別日（datekb=3）は
-            # 仮スケジュール側で扱うためここでは除外する。
-            closed_days = self._fetch_closed_days(studio, week_start)
             # reserve API は朝 9:00 に「今日+6 日」を新規解放する。9:00 前の
             # 時点では末尾日（今日+6 日）のレッスンがまだ取得できず、カレンダーの
             # 該当列が空になる。このギャップを公開月間 API から補完する。
@@ -90,7 +88,10 @@ class CalendarQueryService:
             missing_dates = {d for d in missing_dates if d >= today}
             if missing_dates:
                 public_lessons = self._fetch_public_monthly_week(studio, week_start)
-                fill = [l for l in public_lessons if l.lesson_date in missing_dates]
+                fill = [
+                    lsn for lsn in public_lessons
+                    if lsn.lesson_date in missing_dates
+                ]
                 if fill:
                     for lesson in fill:
                         # reserve API がまだ開放していない枠。UI では予約予定の
@@ -103,14 +104,6 @@ class CalendarQueryService:
                         "dates=%s fill_lessons=%d",
                         sorted(missing_dates), len(fill),
                     )
-            # 公開月間 API からも取れない日（祝日 datekb=3、翌月未配信の境界週
-                # で月を跨いで一部だけ取れない等）は、過去の observed_lessons を
-                # 元に仮スケジュールで埋める。
-            tentative = self._fill_tentative(
-                studio, lessons, week_start, today, set(closed_days)
-            )
-            if tentative:
-                lessons.extend(tentative)
         else:
             # 未開放週は公開月間 API から取得する。公開月間 API には座席レイアウト
             # 情報が含まれないため、先に reserve API（今日〜+6 日）を叩いて
@@ -124,17 +117,17 @@ class CalendarQueryService:
             except Exception as exc:  # noqa: BLE001 - warmup 失敗は致命ではない
                 logger.warning("calendar warmup fetch_week failed: %s", exc)
             lessons = self._fetch_public_monthly_week(studio, week_start)
-            closed_days = self._fetch_closed_days(studio, week_start)
             # out_of_range でも recurring が当たる lesson は TARGET 化する。
             # reserve API 経路と違い、reservation / FULL / UNRESERVABLE の判定材料はない。
             self._annotate_recurring_state(lessons, today=today)
-            # 翌月分が公開月間 API でまだ配信されていない場合、ここで lessons が
-            # 空になる。仮スケジュールで観測済みの過去週から埋める。
-            tentative = self._fill_tentative(
-                studio, lessons, week_start, today, set(closed_days)
-            )
-            if tentative:
-                lessons.extend(tentative)
+        # 祝日特別日（datekb=3）や、翌月未配信で公開月間 API からも取れない日を、
+        # 過去 1〜3 週前の observed_lessons から借りて仮スケジュールで埋める。
+        # reserve 経路・out_of_range 経路の両方で同じルールが必要なので共通化。
+        tentative = self._fill_tentative(
+            studio, lessons, week_start, today, set(closed_days)
+        )
+        if tentative:
+            lessons.extend(tentative)
         self._annotate_intent_state(lessons)
         logger.info(
             "build_week studio=%s week=%s out_of_range=%s lessons=%d",
@@ -223,13 +216,14 @@ class CalendarQueryService:
         return results
 
     def _fetch_closed_days(self, studio: Studio, week_start: date) -> list[date]:
-        """店舗定休日（datekb=1）のみを公開月間 API から取得する。
+        """仮スケジュール対象外の休館日を公開月間 API から取得する。
 
-        祝日特別日（datekb=3）や翌月未配信日は「月間データに載らない日」として
-        後段の仮スケジュール補完側で扱うため、ここでは対象外とする。
+        具体的には `datekb=1`（店舗定休）と仕様不明の `datekb=2` 等を含める。
+        `datekb=3`（祝日特別日）だけは「月間データには無いが仮スケジュールで
+        埋める対象」として除外する。
 
-        gateway にキャッシュ付き `fetch_closed_days` があるのでそれを使う。
-        毎リクエストで公開月間 API を叩かないよう、月単位で cache する。
+        実装上は `kind="all"` から `kind="special"` を差し引いて返す。
+        gateway 側にキャッシュがあるので毎リクエストで公開月間 API を叩かない。
         """
 
         if not studio.club_code or not studio.sisetcd:
@@ -242,22 +236,29 @@ class CalendarQueryService:
         while cur <= week_end:
             months.add((cur.year, cur.month))
             cur += timedelta(days=1)
-        all_closed: set[date] = set()
+        non_tentative: set[date] = set()
         for year, month in sorted(months):
             try:
-                month_closed = self._gateway.fetch_closed_days(  # type: ignore[attr-defined]
+                all_closed = self._gateway.fetch_closed_days(  # type: ignore[attr-defined]
                     club_code=studio.club_code,
                     sisetcd=studio.sisetcd,
                     year=year,
                     month=month,
-                    kind="fixed",
+                    kind="all",
                 )
-                all_closed.update(month_closed)
+                special = self._gateway.fetch_closed_days(  # type: ignore[attr-defined]
+                    club_code=studio.club_code,
+                    sisetcd=studio.sisetcd,
+                    year=year,
+                    month=month,
+                    kind="special",
+                )
+                non_tentative.update(all_closed - special)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "fetch_closed_days failed year=%d month=%d: %s", year, month, exc
                 )
-        return sorted(d for d in all_closed if week_start <= d <= week_end)
+        return sorted(d for d in non_tentative if week_start <= d <= week_end)
 
     def _fill_tentative(
         self,
@@ -301,34 +302,39 @@ class CalendarQueryService:
         `release_pending=True`, `tentative_source=<候補日>` でマークする。
         `release_pending` を立てることで UI の Intent 登録フォームが自動的に
         表示される。
+
+        target × 最大 3 週分の候補日を 1 クエリで引き、日付ごとに辞書化して
+        ルックアップする（N+1 を避ける）。
         """
 
+        effective_targets = sorted(d for d in target_dates if d >= today)
+        if not effective_targets:
+            return []
+        candidate_dates: list[date] = []
+        for target in effective_targets:
+            for weeks_back in (1, 2, 3):
+                candidate_dates.append(target - timedelta(weeks=weeks_back))
+        observed = observed_lesson_repo.list_by_dates(
+            self._db_path,
+            studio_id=studio.studio_id,
+            studio_room_id=studio.studio_room_id,
+            lesson_dates=candidate_dates,
+        )
+
         results: list[Lesson] = []
-        for target in sorted(target_dates):
-            if target < today:
-                continue
-            rows: list[dict] = []
+        for target in effective_targets:
             source_date: date | None = None
+            rows: list[dict] = []
             for weeks_back in (1, 2, 3):
                 candidate = target - timedelta(weeks=weeks_back)
-                try:
-                    rows = observed_lesson_repo.list_by_date(
-                        self._db_path,
-                        studio_id=studio.studio_id,
-                        studio_room_id=studio.studio_room_id,
-                        lesson_date=candidate,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "tentative: list_by_date failed date=%s: %s",
-                        candidate, exc,
-                    )
-                    rows = []
-                if rows:
+                candidate_rows = observed.get(candidate)
+                if candidate_rows:
                     source_date = candidate
+                    rows = candidate_rows
                     break
             if source_date is None or not rows:
                 continue
+            appended = 0
             for row in rows:
                 start_time = str(row.get("start_time") or "")
                 program_id = str(row.get("program_id") or "")
@@ -360,9 +366,10 @@ class CalendarQueryService:
                     tentative_source=source_date,
                 )
                 results.append(lesson)
+                appended += 1
             logger.info(
                 "tentative filled: target=%s source=%s lessons=%d",
-                target, source_date, len(rows),
+                target, source_date, appended,
             )
         return results
 

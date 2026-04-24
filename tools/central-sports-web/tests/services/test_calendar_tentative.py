@@ -238,3 +238,142 @@ def test_studio_ref_matches_expected(tmp_path: Path) -> None:
         today=date(2026, 4, 24),
     )
     assert result == []
+
+
+def test_build_tentative_target_equals_today_is_included(tmp_path: Path) -> None:
+    """境界値 target == today は対象に含める。"""
+
+    db = _prepare_db(tmp_path)
+    observed_lesson_repo.upsert_many(
+        db,
+        [_observed(date(2026, 4, 17), "10:00", "P", "GP")],
+    )
+    service = _service(db)
+    result = service._build_tentative_lessons(
+        STUDIO,
+        target_dates={date(2026, 4, 24)},
+        today=date(2026, 4, 24),
+    )
+    assert len(result) == 1
+    assert result[0].lesson_date == date(2026, 4, 24)
+    assert result[0].tentative_source == date(2026, 4, 17)
+
+
+def test_build_tentative_with_multiple_targets_partial_match(tmp_path: Path) -> None:
+    """複数 target のうち、一部にだけ観測があるパターン。"""
+
+    db = _prepare_db(tmp_path)
+    # 2026-04-22 (1週前 of 04-29) に観測あり、04-16 / 04-23 は空
+    observed_lesson_repo.upsert_many(
+        db,
+        [_observed(date(2026, 4, 22), "10:00", "P", "GP")],
+    )
+    service = _service(db)
+    result = service._build_tentative_lessons(
+        STUDIO,
+        target_dates={date(2026, 4, 29), date(2026, 4, 30)},
+        today=date(2026, 4, 24),
+    )
+    # 04-29 は 04-22 のデータで埋まる、04-30 はソースなしでスキップ
+    assert len(result) == 1
+    assert result[0].lesson_date == date(2026, 4, 29)
+
+
+def test_fill_tentative_excludes_fixed_closed_days(tmp_path: Path) -> None:
+    """fixed_closed に入っている日は仮スケジュール対象にしない。"""
+
+    db = _prepare_db(tmp_path)
+    observed_lesson_repo.upsert_many(
+        db,
+        [
+            _observed(date(2026, 4, 17), "10:00", "P", "GP"),  # 04-17 = 金 (1週前)
+            _observed(date(2026, 4, 18), "10:00", "P", "GP"),  # 04-18 = 土
+        ],
+    )
+    service = _service(db)
+    # 週: 2026-04-20 (月) ～ 2026-04-26 (日)
+    # fixed_closed: 04-24 (金、定休) を指定
+    result = service._fill_tentative(
+        STUDIO,
+        lessons=[],
+        week_start=date(2026, 4, 20),
+        today=date(2026, 4, 20),
+        fixed_closed={date(2026, 4, 24)},
+    )
+    target_dates = sorted({lesson.lesson_date for lesson in result})
+    # 04-24 (金) は除外されているべき
+    assert date(2026, 4, 24) not in target_dates
+
+
+def test_fill_tentative_skips_already_covered_dates(tmp_path: Path) -> None:
+    """既に実 lesson が存在する日は仮で上書きしない。"""
+
+    db = _prepare_db(tmp_path)
+    observed_lesson_repo.upsert_many(
+        db,
+        [_observed(date(2026, 4, 22), "10:00", "P", "GP")],
+    )
+    service = _service(db)
+    # 04-29 には既に実 lesson がある扱い
+    real = _observed(date(2026, 4, 29), "11:00", "REAL", "RealProg")
+    result = service._fill_tentative(
+        STUDIO,
+        lessons=[real],
+        week_start=date(2026, 4, 27),
+        today=date(2026, 4, 27),
+        fixed_closed=set(),
+    )
+    # 仮 lesson は 04-29 には作られない（covered 扱い）
+    tentative_on_29 = [
+        lesson for lesson in result
+        if lesson.lesson_date == date(2026, 4, 29)
+    ]
+    assert tentative_on_29 == []
+
+
+def test_list_by_dates_batches_and_groups(tmp_path: Path) -> None:
+    """list_by_dates は複数日を一度に引いて日付キーでグルーピングする。"""
+
+    db = _prepare_db(tmp_path)
+    observed_lesson_repo.upsert_many(
+        db,
+        [
+            _observed(date(2026, 4, 15), "10:00", "P1", "A"),
+            _observed(date(2026, 4, 22), "10:00", "P1", "A"),
+            _observed(date(2026, 4, 22), "19:00", "P2", "B"),
+        ],
+    )
+    result = observed_lesson_repo.list_by_dates(
+        db,
+        studio_id=STUDIO.studio_id,
+        studio_room_id=STUDIO.studio_room_id,
+        lesson_dates=[date(2026, 4, 15), date(2026, 4, 22), date(2026, 4, 8)],
+    )
+    assert set(result.keys()) == {date(2026, 4, 15), date(2026, 4, 22)}
+    assert len(result[date(2026, 4, 22)]) == 2
+    # 04-08 は観測無し → キーが立たない
+    assert date(2026, 4, 8) not in result
+
+
+def test_list_by_dates_empty_input_returns_empty_dict(tmp_path: Path) -> None:
+    db = _prepare_db(tmp_path)
+    result = observed_lesson_repo.list_by_dates(
+        db,
+        studio_id=STUDIO.studio_id,
+        studio_room_id=STUDIO.studio_room_id,
+        lesson_dates=[],
+    )
+    assert result == {}
+
+
+def test_list_by_date_on_missing_db_returns_empty(tmp_path: Path) -> None:
+    """DB 読み取り失敗時は空 list を返す（caller に例外を伝播しない）。"""
+
+    missing_db = tmp_path / "does_not_exist.db"
+    result = observed_lesson_repo.list_by_date(
+        missing_db,
+        studio_id=STUDIO.studio_id,
+        studio_room_id=STUDIO.studio_room_id,
+        lesson_date=date(2026, 4, 22),
+    )
+    assert result == []

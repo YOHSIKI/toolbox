@@ -13,11 +13,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 
 from app.domain.entities import Lesson
 from db.connection import read_connection, write_transaction
+
+logger = logging.getLogger(__name__)
 
 
 def upsert_many(db_path: Path, lessons: list[Lesson]) -> int:
@@ -149,8 +152,8 @@ def list_by_date(
 
     `list_by_range` は `(date, time)` キーの dict を返し同じ (date, time)
     で複数 program_id を畳み込んでしまうが、こちらは観測行をそのまま全件
-    返す。仮スケジュール生成（`calendar_query._build_tentative_lessons`）
-    が過去日のレッスン一覧を取り出すために使う。
+    返す。単一日取得が必要な既存 caller 用。複数日を一気に引きたい場合は
+    `list_by_dates` の方が DB 負荷が少ない。
 
     Returns: list[dict] — 各要素に以下のキーを含む:
       - `start_time`
@@ -159,40 +162,85 @@ def list_by_date(
       - `studio_room_space_id`
       - `capacity`
       - `observed_at`
+
+    DB 失敗時は警告ログを残して空 list を返す（caller に例外を伝播しない）。
     """
 
-    with read_connection(db_path) as con:
-        rows = con.execute(
-            """
-            SELECT start_time, program_id, program_name,
-                   instructor_id, instructor_name, studio_room_space_id,
-                   capacity, observed_at
-            FROM observed_lessons
-            WHERE studio_id = ?
-              AND studio_room_id = ?
-              AND lesson_date = ?
-            ORDER BY start_time ASC
-            """,
-            (
-                int(studio_id),
-                int(studio_room_id),
-                lesson_date.isoformat(),
-            ),
-        ).fetchall()
-
-    return [
-        {
-            "start_time": str(row["start_time"] or ""),
-            "program_id": row["program_id"],
-            "program_name": row["program_name"],
-            "instructor_id": row["instructor_id"],
-            "instructor_name": row["instructor_name"],
-            "studio_room_space_id": row["studio_room_space_id"],
-            "capacity": row["capacity"],
-            "observed_at": row["observed_at"],
-        }
-        for row in rows
-    ]
+    grouped = list_by_dates(
+        db_path,
+        studio_id=studio_id,
+        studio_room_id=studio_room_id,
+        lesson_dates=[lesson_date],
+    )
+    return grouped.get(lesson_date, [])
 
 
-__all__ = ["upsert_many", "list_by_range", "list_by_date"]
+def list_by_dates(
+    db_path: Path,
+    *,
+    studio_id: int,
+    studio_room_id: int,
+    lesson_dates: list[date],
+) -> dict[date, list[dict]]:
+    """複数日を 1 クエリで引き、日付ごとにグルーピングした dict を返す。
+
+    仮スケジュール生成のように target × 最大 3 週分を探索する用途で、
+    日付単位のループから SELECT 回数を 1 回に減らすために使う。
+
+    Returns: {lesson_date: [row_dict, ...]} — 観測のある日のみキーが立つ。
+    DB 失敗時は警告ログを残して空 dict を返す。
+    """
+
+    if not lesson_dates:
+        return {}
+    unique_dates = sorted({d for d in lesson_dates})
+    placeholders = ",".join("?" * len(unique_dates))
+    try:
+        with read_connection(db_path) as con:
+            rows = con.execute(
+                f"""
+                SELECT lesson_date, start_time, program_id, program_name,
+                       instructor_id, instructor_name, studio_room_space_id,
+                       capacity, observed_at
+                FROM observed_lessons
+                WHERE studio_id = ?
+                  AND studio_room_id = ?
+                  AND lesson_date IN ({placeholders})
+                ORDER BY lesson_date ASC, start_time ASC
+                """,
+                (
+                    int(studio_id),
+                    int(studio_room_id),
+                    *(d.isoformat() for d in unique_dates),
+                ),
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001 - UI を落とさない
+        logger.warning(
+            "observed list_by_dates failed studio=%d room=%d dates=%s: %s",
+            int(studio_id), int(studio_room_id),
+            [d.isoformat() for d in unique_dates], exc,
+        )
+        return {}
+
+    result: dict[date, list[dict]] = {}
+    for row in rows:
+        try:
+            d = date.fromisoformat(str(row["lesson_date"]))
+        except (TypeError, ValueError):
+            continue
+        result.setdefault(d, []).append(
+            {
+                "start_time": str(row["start_time"] or ""),
+                "program_id": row["program_id"],
+                "program_name": row["program_name"],
+                "instructor_id": row["instructor_id"],
+                "instructor_name": row["instructor_name"],
+                "studio_room_space_id": row["studio_room_space_id"],
+                "capacity": row["capacity"],
+                "observed_at": row["observed_at"],
+            }
+        )
+    return result
+
+
+__all__ = ["upsert_many", "list_by_range", "list_by_date", "list_by_dates"]
