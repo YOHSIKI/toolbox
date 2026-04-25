@@ -38,6 +38,7 @@
     <div class="legend-item"><span class="legend-swatch legend-swatch--reserved"></span>予約済み</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--pending-intent"></span>予約実行待ち</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--target"></span>定期予約登録</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--tentative"></span>仮スケジュール（過去データから推定）</div>
     <div class="legend-item"><span class="legend-swatch legend-swatch--full"></span>予約不可（満席・期限切れ・開催済）</div>
   </div>
 </div>
@@ -46,12 +47,10 @@
 
   <div class="cal">
     <div class="cal-head"></div>
-    {% set closed_set = view.closed_dates or [] %}
     {% for day in view.days %}
       {% set is_today = (day == today) %}
       {% set weekday = day.weekday() %}
-      {% set is_closed = day in closed_set %}
-      <div class="cal-head {% if is_closed %}cal-head--closed{% endif %}">
+      <div class="cal-head">
         <div class="cal-head-day {% if is_today %}cal-head-day--today{% endif %}">{{ day.day }}</div>
         {% if weekday == 5 %}
           <span class="cal-head-weekday--sat">土</span>
@@ -59,9 +58,6 @@
           <span class="cal-head-weekday--sun">日</span>
         {% else %}
           {{ weekday_labels[weekday] }}
-        {% endif %}
-        {% if is_closed %}
-          <span class="cal-head-closed-badge">休館</span>
         {% endif %}
       </div>
     {% endfor %}
@@ -78,6 +74,7 @@
             {% elif lesson.state.value == 'target' %}{% set cls = 'lesson lesson--target' %}
             {% elif lesson.state.value == 'full' or lesson.state.value == 'unreservable' %}{% set cls = 'lesson lesson--full' %}
             {% endif %}
+            {% if lesson.tentative_source %}{% set cls = cls ~ ' lesson--tentative' %}{% endif %}
             {% set sel = view.selected_lesson %}
             {% set is_selected = sel is not none and sel.lesson_date == lesson.lesson_date and sel.start_time == lesson.start_time and sel.program_id == lesson.program_id %}
             <a class="{{ cls }}{% if is_selected %} lesson--is-selected{% endif %}" href="?week={{ view.week_start.isoformat() }}&date={{ lesson.lesson_date.isoformat() }}&program={{ lesson.program_id }}&time={{ lesson.start_time }}">
@@ -85,6 +82,7 @@
               {% elif lesson.state.value == 'reserved' and lesson.reserved_origin and lesson.reserved_origin.value == 'recurring' %}<span class="lesson-star">★</span>
               {% endif %}
               {% if lesson.intent_id %}<span class="lesson-star">◎</span>{% endif %}
+              {% if lesson.tentative_source %}<span class="lesson-badge-tentative">仮</span>{% endif %}
               <div class="lesson-time mono">{{ lesson.start_time }}{% if lesson.end_time %}–{{ lesson.end_time }}{% endif %}</div>
               <div class="lesson-name">{{ lesson.program_name }}</div>
               <div class="lesson-sub">
@@ -215,7 +213,9 @@
           <input type="hidden" name="program_id" value="{{ lesson.program_id }}">
           <input type="hidden" name="program_name" value="{{ lesson.program_name }}">
           <div class="muted" style="font-size:12px; line-height:1.5;">
-            {% if lesson.release_pending %}
+            {% if lesson.tentative_source %}
+              このレッスンは月間スケジュール未配信のため、{{ lesson.tentative_source.strftime('%m/%d') }} の実績から作った<b>仮スケジュール</b>です。<b>予約予定</b>を登録しておくと、開放日の 09:00 に自動で席を取りにいきます（当日の実データに差し替わります）。
+            {% elif lesson.release_pending %}
               本日 09:00 に予約が開放されます。事前に<b>予約予定</b>を登録しておくと、開放時に自動で席を取りにいきます。
             {% else %}
               対象日の 7 日前 09:00 に自動で予約を取りにいく<b>予約予定</b>を登録できます。

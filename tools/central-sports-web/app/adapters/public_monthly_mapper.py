@@ -12,10 +12,10 @@ import calendar as _calendar
 import re as _re
 import unicodedata as _unicodedata
 from datetime import date
+from typing import Literal
 
 from app.domain.entities import Lesson, LessonState
 from infra.hacomono.public_monthly import PublicMonthlyPayload
-
 
 _WHITESPACE_RE = _re.compile(r"\s+")
 
@@ -116,23 +116,29 @@ def collect_closed_dates(
     *,
     year: int,
     month: int,
+    kind: Literal["fixed", "special"] | None = None,
 ) -> set[date]:
     """公開月間 API のレスポンスから、指定月の「通常営業でない日」を返す。
 
     `pims_closed` の `datekb` 仕様（観測＋公式 PDF 突き合わせ）:
       - "0" = 通常営業日
-      - "1" = 定休日（府中店の場合、金曜日）
-      - "3" = GW/祝日などで**通常プログラムと時間が異なる日**。公式 PDF に
-        「営業時間とは異なりますので、直接クラブへお問い合わせください」と
-        注記されており、予約 UI 側では通常のテンプレートレッスンを出すと
-        誤解を招くため休館日と同じ扱いにする（= 該当日を非表示）。
+      - "1" = 定休日（府中店の場合、金曜日）。確実に営業しない
+      - "3" = GW/祝日などで**通常プログラムと時間が異なる日**。営業自体は
+        行われることがあり、当日 Reserve API で実スケジュールが公開される
+        ことがある。月間 API の段階では未配信のため、この関数では「月間
+        データには含まれない日」として分離する
 
-    よって、datekb が "0" 以外は全て「休館扱い」として closed_dates に含める。
-    UI 側のバッジは「休館」で統一（datekb=3 でも詳細はクラブに直接問い合わせる
-    前提なので、このアプリで個別の文言を出し分ける価値は薄い）。
+    `kind` 引数:
+      - `"fixed"` → datekb=1 のみ（店舗定休、仮スケジュール対象外）
+      - `"special"` → datekb=3 のみ（祝日特別日、仮スケジュール補完対象）
+      - `None` → 従来どおり datekb != "0" を全て返す（後方互換）
+
+    UI 側では `"fixed"` のみを「休館扱い」として参照し、`"special"` は通常の
+    欠損日として仮スケジュールで埋める。
     """
 
     closed_dates: set[date] = set()
+    allowed = _closed_datekb_set(kind)
     for entry in payload.closed_days:
         day_raw = entry.get("datebi")
         try:
@@ -142,13 +148,24 @@ def collect_closed_dates(
         if day is None:
             continue
         datekb = str(entry.get("datekb") or "0")
-        if datekb == "0":
+        if datekb not in allowed:
             continue
         try:
             closed_dates.add(date(year, month, day))
         except ValueError:
             continue
     return closed_dates
+
+
+def _closed_datekb_set(
+    kind: Literal["fixed", "special"] | None,
+) -> frozenset[str]:
+    if kind == "fixed":
+        return frozenset({"1"})
+    if kind == "special":
+        return frozenset({"3"})
+    # kind=None: 従来どおり 0 以外の全て（観測範囲では 1 / 3。未知値も拾う）
+    return frozenset({"1", "2", "3", "4", "5", "6", "7", "8", "9"})
 
 
 def map_public_monthly(
