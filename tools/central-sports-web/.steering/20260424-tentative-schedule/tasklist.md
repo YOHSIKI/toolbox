@@ -15,74 +15,77 @@
 
 ## フェーズ 2: 休館判定の 2 分化（datekb=1 / datekb=3）
 
-- [ ] `app/adapters/public_monthly_mapper.py`
-  - [ ] `collect_closed_dates` に `kind: Literal["fixed", "special"] | None = None` 引数を追加
-  - [ ] `kind="fixed"` → `datekb=1` のみ返却
-  - [ ] `kind="special"` → `datekb=3` のみ返却
-  - [ ] `kind=None` → 従来通り `datekb != 0` を全て返却（互換）
-  - [ ] コメントを `datekb` 値の意味（0=通常 / 1=定休 / 3=特別）と合わせて更新
-- [ ] `app/adapters/hacomono_gateway.py`
-  - [ ] `fetch_closed_days` に `kind: str = "fixed"` パラメータを追加
-  - [ ] `collect_closed_dates` 呼び出しに `kind=kind` を引き渡す
-  - [ ] `_closed_days_cache` のキーに `kind` を含める
-- [ ] `app/services/calendar_query.py`
-  - [ ] `_fetch_closed_days` が `kind="fixed"` で gateway を呼ぶように変更
-  - [ ] docstring を「店舗定休（datekb=1）のみを取得」と明記
+- [x] `app/adapters/public_monthly_mapper.py`
+  - [x] `collect_closed_dates` に `kind: Literal["fixed", "special"] | None = None` 引数を追加
+  - [x] `kind="fixed"` → `datekb=1` のみ返却
+  - [x] `kind="special"` → `datekb=3` のみ返却
+  - [x] `kind=None` → 従来通り `datekb != 0` を全て返却（互換）
+  - [x] コメントを `datekb` 値の意味（0=通常 / 1=定休 / 3=特別）と合わせて更新
+- [x] `app/adapters/hacomono_gateway.py`
+  - [x] `fetch_closed_days` に `kind: str = "fixed"` パラメータを追加
+  - [x] `collect_closed_dates` 呼び出しに `kind=kind` を引き渡す
+  - [x] `_closed_days_cache` のキーに `kind` を含める
+- [x] `app/services/calendar_query.py`
+  - [x] `_fetch_closed_days` が `all - special` で gateway を呼ぶように変更（datekb=2 等の未知値もカバー）
+  - [x] docstring を実態に合わせて更新
 
-## フェーズ 3: observed_lesson_repo に list_by_date 追加
+## フェーズ 3: observed_lesson_repo に list_by_date/list_by_dates 追加
 
-- [ ] `db/repositories/observed_lesson_repo.py`
-  - [ ] `list_by_date(db_path, *, studio_id, studio_room_id, lesson_date: date) -> list[dict]` を追加
-  - [ ] 返却 dict に `start_time, program_id, program_name, instructor_id, instructor_name, studio_room_space_id, capacity, observed_at` を含める
-  - [ ] 並びは `start_time ASC`
-  - [ ] `__all__` に追加
-- [ ] ruff check が通ること
+- [x] `db/repositories/observed_lesson_repo.py`
+  - [x] `list_by_date` を追加（単発）
+  - [x] `list_by_dates` を追加（複数日バッチ取得、N+1 解消）
+  - [x] 並びは `start_time ASC`
+  - [x] `__all__` に追加
+  - [x] DB 例外は repo 側で握り空返却
+- [x] ruff check が通ること
 
 ## フェーズ 4: 仮スケジュール生成ロジック
 
-- [ ] `app/services/calendar_query.py`
-  - [ ] `_build_tentative_lessons(studio, target_dates, today) -> list[Lesson]` を新規追加
-    - [ ] `target_dates` のうち `d >= today` だけ対象
-    - [ ] 候補週 `[d - 7d, d - 14d, d - 21d]` を順に `observed_lesson_repo.list_by_date` で引く
-    - [ ] 最初に行がヒットした週を採用し、`Lesson` オブジェクト群を生成
-    - [ ] 生成 Lesson のフィールド: `studio_lesson_id=0`, `lesson_date=d`, 観測値（time/program/instructor/space/capacity）, `is_reservable=False`, `remaining_seats=None`, `state=AVAILABLE`, `release_pending=True`, `tentative_source=<候補日>`, `source_progcd=None`
-    - [ ] ログ: 何日分・どの候補日から取ったかを INFO 出力（例: "tentative filled: target=2026-04-29 source=2026-04-22 lessons=5"）
-  - [ ] `build_week` 内の処理に組み込む
-    - [ ] reserve API 経路: public_monthly fill を終えた後に再度 `covered` を計算し、残った missing を `_build_tentative_lessons` に渡す
-    - [ ] out_of_range 経路: public_monthly 取得後に同様の補完を追加
-    - [ ] 生成した tentative に `_annotate_recurring_state` を適用
-    - [ ] lessons に extend
-  - [ ] `_fetch_closed_days` の返却（`closed_days`）は `fixed_closed_days`（datekb=1 のみ）として使う。missing 計算からは `fixed_closed_days` を除外する
-  - [ ] `CalendarWeek.closed_dates` には `fixed_closed_days` を入れる（UI は表示しないが、将来参照のために保持）
+- [x] `app/services/calendar_query.py`
+  - [x] `_build_tentative_lessons(studio, target_dates, today) -> list[Lesson]` を新規追加
+    - [x] `target_dates` のうち `d >= today` だけ対象
+    - [x] 候補週 `[d - 7d, d - 14d, d - 21d]` を 1 クエリで取得
+    - [x] 最初に行がヒットした週を採用し、`Lesson` オブジェクト群を生成
+    - [x] 生成 Lesson のフィールド: `studio_lesson_id=0`, `lesson_date=d`, 観測値, `is_reservable=False`, `release_pending=True`, `tentative_source=<候補日>`
+    - [x] INFO ログに append 件数を出す
+  - [x] `build_week` 内の処理に組み込む（reserve / out_of_range 両経路の後段に 1 箇所で統合）
+  - [x] `_fetch_closed_days` の返却（`closed_days`）を仮対象外の日として使う
+  - [x] `CalendarWeek.closed_dates` には `closed_days` を入れる（UI は表示しないが将来参照のために保持）
 
 ## フェーズ 5: UI テンプレート更新
 
-- [ ] `ui/templates/reserve_calendar.html`
-  - [ ] 日付ヘッダから `cal-head--closed` クラス付与と「休館」バッジ span を削除
-  - [ ] lesson セルの class 合成に `{% if lesson.tentative_source %}lesson--tentative{% endif %}` を追加
-  - [ ] lesson セル内に `{% if lesson.tentative_source %}<span class="lesson-badge-tentative">仮</span>{% endif %}` を表示
-  - [ ] 凡例（`.legend`）に `legend-swatch--tentative` + ラベル「仮スケジュール」を追加
-  - [ ] 右パネル Intent 登録フォームの説明文を微調整（仮スケジュールの場合に「過去データを元に予測したレッスンです」と補足）
+- [x] `ui/templates/reserve_calendar.html`
+  - [x] 日付ヘッダから `cal-head--closed` クラス付与と「休館」バッジ span を削除
+  - [x] lesson セルの class 合成に `{% if lesson.tentative_source %}lesson--tentative{% endif %}` を追加
+  - [x] lesson セル内に `{% if lesson.tentative_source %}<span class="lesson-badge-tentative">仮</span>{% endif %}` を表示
+  - [x] 凡例（`.legend`）に `legend-swatch--tentative` + ラベル「仮スケジュール」を追加
+  - [x] 右パネル Intent 登録フォームの説明文を微調整（仮スケジュール向けの文言）
 
-- [ ] CSS（`ui/static/styles.css` またはテンプレート直近の該当箇所）
-  - [ ] `.lesson--tentative` — 背景色を薄いグレー（既存のトークンを流用できれば流用、なければ `--muted` 系）
-  - [ ] `.lesson-badge-tentative` — 小さいピル状バッジ（「仮」文字）
-  - [ ] `.legend-swatch--tentative` — 凡例用 swatch
+- [x] CSS（`ui/static/styles.css`）
+  - [x] `.lesson--tentative` — 薄いグレー系
+  - [x] `.lesson-badge-tentative` — 「仮」バッジ
+  - [x] `.legend-swatch--tentative` — 凡例用 swatch
 
 ## フェーズ 6: ユニットテスト
 
-- [ ] `tests/` 配下に仮スケジュール生成の単体テストを追加（既存のテスト配置慣習に従う）
-  - [ ] 1 週前に観測あり → 1 週前データで仮 lesson が生成される
-  - [ ] 1 週前ゼロ件・2 週前ありで 2 週前のデータが採用される
-  - [ ] 3 週前まで全て無しなら空配列
-  - [ ] 過去日（today 未満）は常に空配列
-- [ ] `pytest` 実行で新規テストがパスする
+- [x] `tests/services/test_calendar_tentative.py` を新設
+  - [x] 1 週前に観測あり → 1 週前データで仮 lesson が生成される
+  - [x] 1 週前ゼロ件・2 週前ありで 2 週前のデータが採用される
+  - [x] 3 週前まで全て無しなら空配列
+  - [x] 過去日（today 未満）は常に空配列
+  - [x] 境界値 `target == today`
+  - [x] 複数 target で一部のみ観測あり
+  - [x] `fixed_closed` の日は仮スケジュール対象外（`_fill_tentative` 経由）
+  - [x] 既存 lessons と衝突する日は仮を追加しない
+  - [x] `list_by_dates` のグルーピング / 空入力
+  - [x] DB 欠落時の空返却
+- [x] `pytest` 実行で新規テスト 14 本 + 既存 3 本 = 17 本がパス
 
 ## フェーズ 7: 静的チェック
 
-- [ ] `ruff check app/ db/ ui/` — 新規違反なし（既存違反は触らない）
-- [ ] 旧 `collect_closed_dates` / `fetch_closed_days` の引数デフォルト挙動が変わっていないこと（他呼び出し元を grep で確認）
-- [ ] `grep -r "tentative_source" tools/central-sports-web/` で想定箇所のみ変更されていることを確認
+- [x] `ruff check` — 今回変更したファイルで新規違反なし（All checks passed）
+- [x] 旧 `collect_closed_dates` / `fetch_closed_days` の引数デフォルト挙動が変わっていないこと
+- [x] `grep -r "tentative_source"` で想定箇所のみ変更されていること
 
 ## フェーズ 8: ビルド & デプロイ
 
@@ -103,19 +106,21 @@
 
 ## フェーズ 9.5: 3LLM レビュー反映
 
-- [ ] `calendar_query.py:15` 未使用 import `collect_closed_dates` を削除
-- [ ] `calendar_query.py` 仮スケジュール補完のコメントインデントを修正
-- [ ] `_fill_tentative` の呼び出しを reserve / out_of_range の両経路から外に出し 1 箇所に統合
-- [ ] `_fetch_closed_days` の返却を `all - special` に変更し、datekb=2 等の未知値も誤って仮対象にしないようにする
-- [ ] `observed_lesson_repo.list_by_dates` を新設し、複数日を 1 クエリで取得（N+1 解消）
-- [ ] `_build_tentative_lessons` を `list_by_dates` ベースに書き換え、target × 3 週分を最大 1 クエリに
-- [ ] 仮スケジュール件数の INFO ログを実際に append した件数に合わせる
-- [ ] `list_by_date` / `list_by_dates` の内部例外はリポジトリ側で握って空返却（警告ログ）
-- [ ] テスト追加: `fixed_closed` の日は仮スケジュールを作らない
-- [ ] テスト追加: 既に lessons で埋まっている日は仮で上書きしない（`_fill_tentative` 経由）
-- [ ] テスト追加: 複数 target_dates のうち一部だけ観測あり、のパターン
-- [ ] テスト追加: `target == today` は仮スケジュール対象になる（境界値）
-- [ ] ruff check 再実行、pytest 再実行
+- [x] `calendar_query.py:15` 未使用 import `collect_closed_dates` を削除
+- [x] `calendar_query.py` 仮スケジュール補完のコメントインデントを修正
+- [x] `_fill_tentative` の呼び出しを reserve / out_of_range の両経路から外に出し 1 箇所に統合
+- [x] `_fetch_closed_days` の返却を `all - special` に変更し、datekb=2 等の未知値も誤って仮対象にしないようにする
+- [x] `observed_lesson_repo.list_by_dates` を新設し、複数日を 1 クエリで取得（N+1 解消）
+- [x] `_build_tentative_lessons` を `list_by_dates` ベースに書き換え、target × 3 週分を最大 1 クエリに
+- [x] 仮スケジュール件数の INFO ログを実際に append した件数に合わせる
+- [x] `list_by_date` / `list_by_dates` の内部例外はリポジトリ側で握って空返却（警告ログ）
+- [x] テスト追加: `fixed_closed` の日は仮スケジュールを作らない
+- [x] テスト追加: 既に lessons で埋まっている日は仮で上書きしない（`_fill_tentative` 経由）
+- [x] テスト追加: 複数 target_dates のうち一部だけ観測あり、のパターン
+- [x] テスト追加: `target == today` は仮スケジュール対象になる（境界値）
+- [x] ruff check 再実行、pytest 再実行
+- [x] ~~`except Exception` を具体化~~ (理由: 既存コードベース全体で `# noqa: BLE001` のスタイルを採用しており、新規コードもこれに合わせる方が整合性が高い。個別修正は別 Issue で全体統一が望ましい)
+- [x] ~~`build_week` 経由の統合テスト~~ (理由: gateway を全モック化する必要があり、既存の central-sports-web テストでも build_week 統合テストはゼロ。ユニットテスト重視の方針に従い、`_fill_tentative` と `_build_tentative_lessons` の単体テストで挙動を網羅済み)
 
 ## フェーズ 10: 振り返り
 
@@ -128,13 +133,21 @@
 ## 振り返り
 
 ### 実装完了日
-YYYY-MM-DD
+2026-04-25
 
 ### 計画と実績の差分
-- {計画と異なった点とその理由}
+- 当初は `_fetch_closed_days` を `kind="fixed"` のみで取得する設計だったが、3LLM レビュー (Codex) の指摘で `kind="all" - kind="special"` に変更。datekb=2 等の未知値も保守的に仮スケジュール対象外にできる
+- 当初の `_build_tentative_lessons` は target × 最大 3 週で 21 回 SQLite を叩く N+1 設計だったが、Codex/Gemini の指摘で `list_by_dates` バッチ取得に書き換え、最大 1 クエリに集約
+- `_fill_tentative` の呼び出しが reserve / out_of_range の両経路に重複していたが、Gemini の指摘で `build_week` の最後に 1 箇所統合
+- ステアリングの「フェーズ8: gateway docker --project central-sports-web compose build」は当初 invalid project エラーで詰まった。`GATEWAY_SOCKET_PATH=/var/run/gateway/sockets/toolbox.sock` で toolbox socket に接続する必要があった
 
 ### 学んだこと
-- {技術的な知見やプロセス改善点}
+- gateway の compose 操作は **socket で project context が決まる**。dev-admin デフォルトは market-platform.sock。toolbox 配下のサービスを操作するには `GATEWAY_SOCKET_PATH=/var/run/gateway/sockets/toolbox.sock` を明示する
+- dev-admin から central-sports-web の HTTP は **`192.168.128.1:8080` (dev-admin bridge gateway 経由)** で届く。`172.30.0.1:8080` は infra 用で別ネットワーク
+- 3LLM レビューの指摘は重複や視点が分かれる。Claude は局所的な品質、Codex は契約・スペック準拠、Gemini は重複/構造の指摘が強い。3 つを総合すると拾える漏れが減る
+- ruff の I001 は `ruff --fix --select I001` でピンポイント修正可能。E741 等の既存違反を巻き込まずに済む
 
 ### 次回への改善提案
-- {次回の改善点}
+- toolbox 配下の新規ツールでは README の運用例に `GATEWAY_SOCKET_PATH=...` を明記する
+- N+1 の早期発見のため、設計レビュー段階で「DB 呼び出し回数 = O(N)」が出てきた時点で `list_by_*` バッチ版の有無を必ず確認する
+- 新規作業時、`gateway system check-config` の disk 設定と `--project` で valid な値が乖離する事象（in-memory キャッシュ）に再度詰まらないよう、socket リスト `/var/run/gateway/sockets/` を最初に確認する習慣を徹底する
