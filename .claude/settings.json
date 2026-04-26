@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "toolbox \u30ea\u30dd\u7528 settings.json\u3002agent-config/templates/claude/settings.json.template \u304b\u3089\u751f\u6210\u3002ADR-0009 hooks \u5168\u90e8\u5165\u308a\u3002",
+  "_doc": "\u8a73\u7d30\u306f /workspace/agent-config/worklog/active/20260426-harness-redesign/decisions/0009-hooks-enforce-rules.md \u53c2\u7167",
+  "permissions": {
+    "allow": [
+      "Skill(implement)",
+      "Skill(investigate-bug)",
+      "Skill(spec)",
+      "Skill(review-docs)",
+      "Skill(create-diagram)",
+      "Skill(create-manual)",
+      "Skill(skill-creator)",
+      "Skill(codex)",
+      "Skill(gemini)",
+      "Skill(external-llm)",
+      "Skill(auto-doc-update)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/git-guard.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/docker-guard.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/pretooluse-test-pass-check.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/pretooluse-doc-sync-check.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/worktree-guard.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/pretooluse-deny-steering.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /workspace/agent-config/shared/hooks/pretooluse-master-doc-warn.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/posttooluse-stuck-detect.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/stop-worklog-check.py",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/stop-test-verification.py",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/stop-finding-prompt.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/precompact-worklog-save.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /workspace/agent-config/shared/hooks/discord-notify.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

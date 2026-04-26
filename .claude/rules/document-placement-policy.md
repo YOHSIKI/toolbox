@@ -1,0 +1,1 @@
+../../../agent-config/shared/rules/document-placement-policy.md

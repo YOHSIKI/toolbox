@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/pretooluse-test-pass-check.sh

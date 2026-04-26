@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/git-guard.sh

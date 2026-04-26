@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/stop-test-verification.py
