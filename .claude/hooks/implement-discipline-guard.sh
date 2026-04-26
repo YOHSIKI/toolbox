@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/implement-discipline-guard.sh

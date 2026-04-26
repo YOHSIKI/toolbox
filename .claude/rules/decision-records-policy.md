@@ -1,0 +1,1 @@
+../../../agent-config/shared/rules/decision-records-policy.md

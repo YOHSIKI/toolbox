@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/discord-notify.py

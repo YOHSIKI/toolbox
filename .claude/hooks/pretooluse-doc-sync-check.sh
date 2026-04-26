@@ -1,0 +1,1 @@
+../../../agent-config/shared/hooks/pretooluse-doc-sync-check.sh
